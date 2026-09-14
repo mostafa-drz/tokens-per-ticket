@@ -167,7 +167,11 @@ Then add the dev dependencies `tsx`, `yaml`, and `zod`, and the two scripts to `
 
 If `src/lib` is taken in that repo, put the files elsewhere and update the imports in the scripts and the `src/lib/contract.ts` path in the hook. Each developer puts `LITELLM_BASE_URL` and `LITELLM_API_KEY` in that repo's `.env.local` (see `.env.example`), and `LINEAR_API_KEY` if they post reports. The scripts also read the main checkout's `.env.local` when run inside a ticket worktree, which never has its own.
 
-### 5. Start a ticket
+### 5. Adopt the ticket contract
+
+The defaults follow Linear's branch names (`mostafa/eng-123-retry-checkout-on-429`). If your branches look different, edit [`ticket-contract.yaml`](#the-ticket-contract) first, then **commit it to the branch new work starts from**. `ticket:start` reads the contract in your main checkout, but each ticket worktree, and the hook running in it, reads the committed copy. An uncommitted edit makes the hook warn that the branch it just created "doesn't follow ticket-contract.yaml".
+
+### 6. Start a ticket
 
 ```bash
 pnpm ticket:start ENG-123 "retry checkout on 429"
@@ -175,13 +179,15 @@ pnpm ticket:start ENG-123 "retry checkout on 429"
 
 This:
 
-1. names a branch from the contract: `{user}/eng-123-retry-checkout-on-429`, where `{user}` is your `git config user.name` slugged (set `TICKET_USER` to override)
+1. names a branch from the contract: `{user}/eng-123-retry-checkout-on-429`, where `{user}` is your `git config user.name` slugged (set `TICKET_USER` to override). If a local branch for the ticket already exists (under any title), it uses that one instead
 2. creates it in its own worktree, `../<repo>.worktrees/<user>__eng-123-…`, so your current checkout is never switched and uncommitted work is never touched
 3. launches `claude` there with `x-litellm-tags: ticket:ENG-123`, and names the session `ENG-123`
 
 Running it again for the same ticket reuses the worktree. Use `--print` to get the command without launching, and `--base origin/main` to choose where a new branch starts.
 
-### 6. See what it cost
+A new worktree has no `node_modules`, and the `SessionStart` hook skips its checks until it does. For the check on the first session, run `pnpm ticket:start ENG-123 --print`, then `pnpm install` in the worktree, then paste the printed command.
+
+### 7. See what it cost
 
 ```bash
 pnpm ticket:report                  # the ticket of the current branch, last 30 days
@@ -199,11 +205,12 @@ pnpm ticket:report ENG-123 --post   # also create or update the comment on the L
 `ticket-contract.yaml` is the one file a team edits to adopt this repo:
 
 ```yaml
+tracker: linear                       # where ticket:report --post writes (Linear only)
 key:
   pattern: "[A-Z][A-Z0-9]*-[0-9]+"   # how your tracker prints keys
   teams: []                           # optional allowlist, e.g. [ENG, AIS]
 branch:
-  template: "{user}/{key}-{slug}"     # Linear's default "Copy git branch name"
+  template: "{user}/{key}-{slug}"     # Linear's default "Copy git branch name"; {user}, {key}, {KEY}, {slug}
 tag:
   prefix: "ticket:"
 worktree:
@@ -212,7 +219,9 @@ worktree:
 
 Branches are parsed **by the template**, not by searching for something that looks like a key. A loose search reads `dependabot/npm_and_yarn/next-16` as ticket `NEXT-16`. With the template, branches outside the contract (`main`, spikes, bots) are simply unattributed. That's the honest answer.
 
-`{key}` writes the key lowercased, as Linear does. `{KEY}` keeps it as the tracker prints it. Using Jira with `feature/PROJ-42_login`? Set `template: "feature/{KEY}_{slug}"`: Jira only [links branches whose key is uppercase](https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/), and on a case-insensitive file system (macOS) a lowercased `feature/proj-42_login` collides with an existing `feature/PROJ-42_login`. Parsing is case-insensitive either way, so hand-typed branches still count. `ticket:report --post` only writes to Linear; see [the ticket report](#5-see-what-it-cost).
+`{key}` writes the key lowercased, as Linear does. `{KEY}` keeps it as the tracker prints it. Using Jira with `feature/PROJ-42_login`? Set `template: "feature/{KEY}_{slug}"`: Jira only [links branches whose key is uppercase](https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/), and on a case-insensitive file system (macOS) a lowercased `feature/proj-42_login` collides with an existing `feature/PROJ-42_login`. Parsing is case-insensitive either way, so hand-typed branches still count. `ticket:report --post` only writes to Linear; see [the ticket report](#6-see-what-it-cost).
+
+A `teams` allowlist also filters the ledger, `ticket:report`, and the hook: tags for other teams are ignored. That includes the sample data (`TPT-*`) and `ticket:report SMOKE-1`, so try the five-minute loop before you set it.
 
 ---
 
