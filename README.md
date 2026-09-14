@@ -112,25 +112,44 @@ Budgets and alerts you set for the product also see this traffic, and the ledger
 
 ### 2. Give each developer a key
 
-Developers never use the master key. Create a virtual key per person, with a budget:
+Developers never use the master key. With more than one team, create a LiteLLM team per engineering team with its own budget, a user per developer, and a virtual key bound to both ([virtual keys](https://docs.litellm.ai/docs/proxy/virtual_keys), [users and teams](https://docs.litellm.ai/docs/proxy/users)). A call is refused when either the key's or the team's budget is used up:
 
 ```bash
+# Once per team. Keep the returned team_id.
+curl -X POST "$LITELLM_BASE_URL/team/new" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"team_alias": "payments", "max_budget": 2000, "budget_duration": "30d"}'
+
+# Once per developer.
+curl -X POST "$LITELLM_BASE_URL/user/new" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"user_id": "mostafa", "user_role": "internal_user", "auto_create_key": false}'
 curl -X POST "$LITELLM_BASE_URL/key/generate" \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"key_alias": "mostafa", "max_budget": 200, "budget_duration": "30d"}'
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"key_alias": "mostafa", "user_id": "mostafa", "team_id": "<team_id>", "max_budget": 200, "budget_duration": "30d"}'
 ```
 
-These keys can call models, but they can't read spend routes (`/tag/daily/activity` answers 401). The ledger and `ticket:report` need a key that can. Don't hand out the master key for that: create a user with LiteLLM's read-only `proxy_admin_viewer` role, which can view all spend but can't create keys or users ([access control](https://docs.litellm.ai/docs/proxy/access_control)). `/user/new` returns its key:
+Checked on `v1.100.1`: a key over its team's budget gets `429 budget_exceeded`. The budget is checked before a call and charged after it, so one long request can overshoot it. Add `"models": [...]` to a key to keep some models off-limits.
+
+Developer keys can't read the organization's spend. A key without a user answers 401 on `/tag/daily/activity`. A key bound to an `internal_user` answers **200 with only its own keys' spend** (`_get_tag_daily_activity_api_key_filter` in LiteLLM's `tag_management_endpoints.py`). Never point the ledger or a shared report job at a developer's key: it shows a fraction of the spend and no error.
+
+The ledger needs a key that reads all spend. Don't use the master key for that: create a user with LiteLLM's read-only `proxy_admin_viewer` role ([access control](https://docs.litellm.ai/docs/proxy/access_control)), and remove its model access with `no-default-models`. `/user/new` returns its key:
 
 ```bash
 curl -X POST "$LITELLM_BASE_URL/user/new" \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "ledger-reader", "user_role": "proxy_admin_viewer"}'
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"user_id": "ledger-reader", "user_role": "proxy_admin_viewer", "models": ["no-default-models"]}'
 ```
 
-Checked on `v1.100.1`: that key reads `/tag/daily/activity` and gets 403 on `/key/generate`. It can still call models and it sees the whole organization's spend, so treat it as a secret: put it in Vercel's server-side environment, and give it only to the people who run `ticket:report`.
+Checked on `v1.100.1`: that key reads `/tag/daily/activity` and gets 403 on `/key/generate` and on model calls. Without `no-default-models`, it can call every model with no budget. It can still read everything a viewer can: `/spend/logs` for every request, `/user/list`, `/key/list`, and the callback settings. Treat it like an admin credential. Put it only in Vercel's server-side environment and in whatever posts reports for the org (a CI job, for example). Don't hand a copy to every developer: they can read their ticket's numbers in the ledger.
+
+Review spend calls a model, so give it a separate ordinary key in `LEDGER_REVIEW_API_KEY`, capped and limited to the review model:
+
+```bash
+curl -X POST "$LITELLM_BASE_URL/key/generate" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"key_alias": "ledger-review", "models": ["claude-haiku-4-5"], "max_budget": 20, "budget_duration": "30d"}'
+```
 
 ### 3. Connect Claude Code to the gateway
 
@@ -165,7 +184,7 @@ Then add the dev dependencies `tsx`, `yaml`, and `zod`, and the two scripts to `
 "ticket:report": "node --import tsx scripts/ticket-report.mts"
 ```
 
-If `src/lib` is taken in that repo, put the files elsewhere and update the imports in the scripts and the `src/lib/contract.ts` path in the hook. Each developer puts `LITELLM_BASE_URL` and `LITELLM_API_KEY` in that repo's `.env.local` (see `.env.example`), and `LINEAR_API_KEY` if they post reports. The scripts also read the main checkout's `.env.local` when run inside a ticket worktree, which never has its own.
+If `src/lib` is taken in that repo, put the files elsewhere and update the imports in the scripts and the `src/lib/contract.ts` path in the hook. `ticket:report` and `/ticket-cost` read `LITELLM_BASE_URL` and `LITELLM_API_KEY` from that repo's `.env.local` (see `.env.example`), and `LINEAR_API_KEY` for `--post`. That key has to read the whole organization's spend (see [step 2](#2-give-each-developer-a-key)), so in a multi-team org don't copy it to every laptop: run `ticket:report --post` from one place that holds it, such as a CI job, and let developers use the ledger. The scripts also read the main checkout's `.env.local` when run inside a ticket worktree, which never has its own.
 
 ### 5. Adopt the ticket contract
 
@@ -237,8 +256,9 @@ It has one AI feature, **Review spend**. A model reads a ticket's numbers and po
 |---|---|
 | `LEDGER_DATA` | `sample` (default) or `litellm` |
 | `LITELLM_BASE_URL` | Gateway URL |
-| `LITELLM_API_KEY` | A key that can read spend routes: the master key locally, a [`proxy_admin_viewer` key](#2-give-each-developer-a-key) in production. Server-side only; never prefix it with `NEXT_PUBLIC_`. |
-| `LEDGER_REVIEW_MODEL` | Model for Review spend, e.g. `claude-haiku-4-5`. Empty turns the feature off. In production it also needs `LEDGER_BASIC_AUTH`, because each click spends tokens on `LITELLM_API_KEY`. |
+| `LITELLM_API_KEY` | A key that reads all spend: the master key locally, a [`proxy_admin_viewer` key with `no-default-models`](#2-give-each-developer-a-key) in production. Not a developer's key, which silently reads only its own spend. Server-side only; never prefix it with `NEXT_PUBLIC_`. |
+| `LEDGER_REVIEW_MODEL` | Model for Review spend, e.g. `claude-haiku-4-5`. Empty turns the feature off. In production it also needs `LEDGER_BASIC_AUTH`, because each click spends tokens. |
+| `LEDGER_REVIEW_API_KEY` | The [budgeted key](#2-give-each-developer-a-key) Review spend calls the model with. Falls back to `LITELLM_API_KEY`, which is only right locally. |
 | `LEDGER_BASIC_AUTH` | `user:password`. Required in production when `LEDGER_DATA=litellm`. |
 | `LINEAR_API_KEY` | Only for `pnpm ticket:report --post` |
 
