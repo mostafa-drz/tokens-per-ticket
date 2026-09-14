@@ -88,6 +88,19 @@ describe("naming", () => {
     assert.equal(branchName({ user: "mostafa", key: "ENG-9", slug: "" }, contract), "mostafa/eng-9");
   });
 
+  it("drops the slug separator too when a custom template has no title", () => {
+    const jira = parseContract(`
+key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
+branch: { template: "feature/{key}_{slug}" }
+tag: { prefix: "ticket:" }
+worktree: { path: "../{repo}.worktrees/{branch}" }
+`);
+    const branch = branchName({ user: "mostafa", key: "PROJ-43", slug: "" }, jira);
+    assert.equal(branch, "feature/proj-43");
+    assert.equal(findTicketKey(branch, jira), "PROJ-43");
+    assert.equal(branchName({ user: "mostafa", key: "PROJ-43", slug: "Login page" }, jira), "feature/proj-43_login-page");
+  });
+
   it("places worktrees next to the repo, one folder per branch", () => {
     assert.equal(
       worktreePath({ repoRoot: "/work/tokens-per-ticket", branch: "mostafa/eng-9" }, contract),

@@ -61,6 +61,9 @@ export function findTicketKey(branch: string, contract: TicketContract): string 
   return match ? normalizeTicketKey(match[1], contract) : null;
 }
 
+/** The optional slug and the one separator character in front of it. */
+const SLUG_WITH_SEPARATOR = /[-_./]?\{slug\}/g;
+
 function branchPattern(contract: TicketContract): RegExp {
   const source = contract.branch.template
     .split(/(\{user\}|\{key\}|[-_./]?\{slug\})/)
@@ -102,11 +105,16 @@ export function branchName(
   input: { user: string; key: string; slug: string },
   contract: TicketContract,
 ): string {
-  return contract.branch.template
-    .replaceAll("{user}", slugify(input.user))
-    .replaceAll("{key}", input.key.toLowerCase())
-    .replaceAll("{slug}", slugify(input.slug))
-    .replace(/-+$/g, "");
+  const slug = slugify(input.slug);
+  return (
+    contract.branch.template
+      // Without a title, drop the slug together with its separator, whatever
+      // it is ("-", "_", ".", "/"). Leaving "feature/proj-42_" behind would
+      // create a branch that findTicketKey can't read back.
+      .replace(SLUG_WITH_SEPARATOR, (part) => (slug ? part.replace("{slug}", slug) : ""))
+      .replaceAll("{user}", slugify(input.user))
+      .replaceAll("{key}", input.key.toLowerCase())
+  );
 }
 
 export function worktreePath(
