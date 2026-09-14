@@ -16,7 +16,8 @@
     "gateway:up": "docker compose -f gateway/docker-compose.yml up -d",
     "gateway:down": "docker compose -f gateway/docker-compose.yml down",
     "gateway:smoke": "node --import tsx scripts/gateway-smoke.mts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:registry": "npm --prefix registry test"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.48",

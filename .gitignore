@@ -50,3 +50,6 @@ gateway/.env
 
 # agent worktrees created by Claude Code
 /.claude/worktrees/
+
+# registry dependencies
+/registry/node_modules/
