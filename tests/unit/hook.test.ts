@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 import { HOOK_SCRIPT, ensureCommitTrailerHook, refreshTrustedCli, runGitTrailer, trustedCliPath } from "../../src/cli/git-trailer.ts";
-import { handleHook } from "../../src/cli/hook.ts";
+import { HOOK_COMMAND, handleHook } from "../../src/cli/hook.ts";
 import { mergeHookSettings } from "../../src/cli/init.ts";
 import { loadContract } from "../../src/lib/contract.ts";
 import { keyFingerprint, trustedRegistryUrl, type SessionReport } from "../../src/lib/registry-client.ts";
@@ -187,17 +187,46 @@ describe("commit trailer", () => {
     const root = productRepo("jane/eng-45-x");
     mkdirSync(path.join(root, ".tokens-per-ticket"), { recursive: true });
     writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// trusted build\n");
-    assert.equal(refreshTrustedCli(root), "updated");
+    assert.equal(refreshTrustedCli(root, { replace: false }), "updated");
     const copy = trustedCliPath(root) ?? "";
     assert.equal(realpath(path.dirname(path.dirname(copy))), realpath(path.join(root, ".git")));
     assert.equal(readFileSync(copy, "utf8"), "// trusted build\n");
-    assert.equal(refreshTrustedCli(root), "current");
+    assert.equal(refreshTrustedCli(root, { replace: false }), "current");
 
-    // A branch swaps the checkout's bundle: the git hook still runs the trusted copy.
+    // A branch swaps the checkout's bundle: hooks neither copy nor run it.
     writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// from an untrusted branch\n");
+    assert.equal(refreshTrustedCli(root, { replace: false }), "differs");
     assert.equal(readFileSync(copy, "utf8"), "// trusted build\n");
     assert.match(HOOK_SCRIPT, /--git-common-dir/);
     assert.doesNotMatch(HOOK_SCRIPT, /show-toplevel/);
+
+    // Only an explicit init switches to the checkout's CLI.
+    assert.equal(refreshTrustedCli(root, { replace: true }), "updated");
+    assert.equal(readFileSync(copy, "utf8"), "// from an untrusted branch\n");
+  });
+
+  it("Claude Code hooks run the trusted copy, falling back to the checkout only before one exists", () => {
+    const root = productRepo("jane/eng-46-x");
+    mkdirSync(path.join(root, ".tokens-per-ticket"), { recursive: true });
+    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), 'console.log("ran checkout copy")\n');
+    const run = () => execFileSync("sh", ["-c", HOOK_COMMAND], { cwd: os.tmpdir(), env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8" }).trim();
+
+    assert.equal(run(), "ran checkout copy");
+    const copy = trustedCliPath(root) ?? "";
+    mkdirSync(path.dirname(copy), { recursive: true });
+    writeFileSync(copy, 'console.log("ran trusted copy")\n');
+    assert.equal(run(), "ran trusted copy");
+  });
+
+  it("tells the session when a branch carries a different CLI, without switching to it", async () => {
+    const root = productRepo("jane/eng-47-x");
+    mkdirSync(path.join(root, ".tokens-per-ticket"), { recursive: true });
+    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// v1\n");
+    refreshTrustedCli(root, { replace: true });
+    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// v2 from a branch\n");
+    const output = await handleHook({ hook_event_name: "SessionStart", session_id: "s-cli", cwd: root }, connected, recorder().deps);
+    assert.match(output.systemMessage ?? "", /different \.tokens-per-ticket\/tpt\.mjs than the copy the hooks run/);
+    assert.equal(readFileSync(trustedCliPath(root) ?? "", "utf8"), "// v1\n");
   });
 
   it("installs the git hook, and never overwrites someone else's", () => {
@@ -222,11 +251,24 @@ describe("init settings merge", () => {
       hooks: { SessionStart: [{ hooks: [{ command: "./team-hook.sh" }] }] },
     };
     const first = mergeHookSettings(settings);
-    assert.ok(first.includes("SessionStart hook"));
+    assert.ok(first.includes("added SessionStart hook"));
     assert.equal(settings.hooks.SessionStart.length, 2);
     assert.equal(settings.hooks.SessionStart[0].hooks[0].command, "./team-hook.sh");
     assert.ok(settings.permissions.allow.includes("Bash(npm test)"));
     assert.deepEqual(mergeHookSettings(settings), []);
+  });
+
+  it("replaces a tokens-per-ticket hook written by an older version, keeping the repo's own", () => {
+    const settings = {
+      hooks: {
+        SessionStart: [
+          { hooks: [{ command: "./team-hook.sh" }, { command: "node", args: ["${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs", "hook"] }] },
+        ],
+      },
+    };
+    assert.ok(mergeHookSettings(settings).includes("updated SessionStart hook"));
+    assert.deepEqual(settings.hooks.SessionStart[0], { hooks: [{ command: "./team-hook.sh" }] });
+    assert.equal((settings.hooks.SessionStart[1].hooks[0] as { command: string }).command, HOOK_COMMAND);
   });
 });
 

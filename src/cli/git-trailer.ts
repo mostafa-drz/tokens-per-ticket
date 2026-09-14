@@ -10,11 +10,11 @@ import { BUNDLE_PATH } from "./hint.ts";
  * commit (terminal, IDE, or Claude), and a PR's commits then say which ticket
  * they belong to. https://git-scm.com/docs/git-interpret-trailers
  *
- * The git hook never runs the checkout's .tokens-per-ticket/tpt.mjs: that file
- * changes with whatever branch is checked out, and a git hook runs outside
- * any trust prompt. It runs a copy kept in the git directory instead, which
- * only `tpt init` or the Claude Code session hook (which Claude Code runs only
- * in folders the user trusted) updates.
+ * Neither the git hook nor the Claude Code hooks run the checkout's
+ * .tokens-per-ticket/tpt.mjs once set up: that file changes with whatever
+ * branch is checked out. They run a copy kept in the git directory instead.
+ * The copy is created the first time a hook runs in a clone (from the branch
+ * that clone started on) and replaced only by an explicit `tpt init`.
  */
 
 const MARKER = "# tokens-per-ticket";
@@ -37,16 +37,25 @@ export function trustedCliPath(root: string): string | null {
   return commonDir ? path.join(commonDir, TRUSTED_CLI) : null;
 }
 
+export type TrustedCliState = "updated" | "current" | "differs" | "missing";
+
 /**
- * Copies the checkout's CLI to the git directory for the git hook. Only call
- * from a trusted context: `tpt init`, or the Claude Code session hook.
+ * Copies the checkout's CLI into the git directory.
+ *
+ * `replace: true` is for `tpt init`, an explicit choice to use this
+ * checkout's CLI. Hooks call it with `replace: false`: they only create the
+ * copy when there is none yet, and report "differs" when a branch carries a
+ * different CLI, without running or copying it.
  */
-export function refreshTrustedCli(root: string): "updated" | "current" | "missing" {
+export function refreshTrustedCli(root: string, { replace }: { replace: boolean }): TrustedCliState {
   const source = path.join(root, BUNDLE_PATH);
   const target = trustedCliPath(root);
   if (!target || !existsSync(source)) return "missing";
   try {
-    if (existsSync(target) && readFileSync(target).equals(readFileSync(source))) return "current";
+    if (existsSync(target)) {
+      if (readFileSync(target).equals(readFileSync(source))) return "current";
+      if (!replace) return "differs";
+    }
     mkdirSync(path.dirname(target), { recursive: true });
     copyFileSync(source, target);
     return "updated";

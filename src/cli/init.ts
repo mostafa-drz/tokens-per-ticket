@@ -80,7 +80,7 @@ export async function runInit(argv: string[]): Promise<void> {
   if (added.length) {
     mkdirSync(path.dirname(settingsFile), { recursive: true });
     writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
-    done.push(`added ${added.join(", ")} to .claude/settings.json`);
+    done.push(`.claude/settings.json: ${added.join(", ")}`);
   } else {
     done.push(".claude/settings.json already has the hooks");
   }
@@ -95,7 +95,7 @@ export async function runInit(argv: string[]): Promise<void> {
   }
 
   // 5. Commit trailer hook, running a copy of the CLI kept in the git directory
-  refreshTrustedCli(root);
+  refreshTrustedCli(root, { replace: true });
   const hook = ensureCommitTrailerHook(root, contract);
   if (hook === "installed" || hook === "present") done.push(`commit trailer "${contract.automation.commit_trailer}: <KEY>" is on`);
   if (hook === "foreign") {
@@ -133,18 +133,26 @@ function readSettings(file: string): Settings {
   }
 }
 
-/** Adds the tokens-per-ticket hooks and permissions that aren't there yet. Returns what it added. */
+/**
+ * Adds the tokens-per-ticket hooks and permissions that aren't there yet, and
+ * replaces tokens-per-ticket hooks written by an older version. Everything
+ * else in the file is kept. Returns what it changed.
+ */
 export function mergeHookSettings(settings: Settings): string[] {
   const added: string[] = [];
   settings.hooks ??= {};
+  const ours = (handler: { command?: string; args?: string[] }) =>
+    [handler.command, ...(handler.args ?? [])].some((part) => part?.includes(BUNDLE_PATH));
   for (const [event, groups] of Object.entries(hookSettings())) {
+    const wanted = groups as NonNullable<Settings["hooks"]>[string];
     const existing = settings.hooks[event] ?? [];
-    const present = existing.some((group) =>
-      group.hooks?.some((handler) => [handler.command, ...(handler.args ?? [])].some((part) => part?.includes(BUNDLE_PATH))),
-    );
-    if (present) continue;
-    settings.hooks[event] = [...existing, ...(groups as Settings["hooks"] extends Record<string, infer G> ? G : never)];
-    added.push(`${event} hook`);
+    const current = existing.filter((group) => group.hooks?.some(ours));
+    if (current.length === 1 && JSON.stringify(current[0]) === JSON.stringify(wanted[0])) continue;
+    const others = existing
+      .map((group) => ({ ...group, hooks: (group.hooks ?? []).filter((handler) => !ours(handler)) }))
+      .filter((group) => group.hooks.length > 0);
+    settings.hooks[event] = [...others, ...wanted];
+    added.push(`${current.length ? "updated" : "added"} ${event} hook`);
   }
   settings.permissions ??= {};
   settings.permissions.allow ??= [];

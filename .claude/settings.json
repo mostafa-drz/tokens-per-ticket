@@ -15,11 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs",
-              "hook"
-            ]
+            "command": "c=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket/tpt.mjs\"; [ -f \"$c\" ] || c=\"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\"; node \"$c\" hook"
           }
         ]
       }
@@ -29,11 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs",
-              "hook"
-            ]
+            "command": "c=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket/tpt.mjs\"; [ -f \"$c\" ] || c=\"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\"; node \"$c\" hook"
           }
         ]
       }
@@ -43,11 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs",
-              "hook"
-            ]
+            "command": "c=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket/tpt.mjs\"; [ -f \"$c\" ] || c=\"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\"; node \"$c\" hook"
           }
         ]
       }
@@ -57,11 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs",
-              "hook"
-            ]
+            "command": "c=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket/tpt.mjs\"; [ -f \"$c\" ] || c=\"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\"; node \"$c\" hook"
           }
         ]
       }

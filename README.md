@@ -195,7 +195,7 @@ git add tokens-per-ticket.yaml .tokens-per-ticket .claude && git commit -m "chor
 - **`.tokens-per-ticket/tpt.mjs`**, the whole CLI in one file with no dependencies. Nothing to install, no `tsconfig` or `package.json` changes, and it works with npm, pnpm, or no Node project at all. Fresh clones and worktrees have it as soon as they check out.
 - **Hooks and permissions merged into `.claude/settings.json`**. Existing entries are kept.
 - **The `/ticket-cost` and `/ticket-start` skills.**
-- **A `prepare-commit-msg` git hook** for the commit trailer. It's installed in `.git/hooks` (or your `core.hooksPath`), and the session hook reinstalls it in new clones. An existing hook, such as husky's, is never overwritten; `init` tells you the one line to add to it.
+- **A `prepare-commit-msg` git hook** for the commit trailer, plus the copy of the CLI that all hooks run, both in `.git`. They're installed in `.git/hooks` (or your `core.hooksPath`), and the session hook sets them up in new clones. An existing hook, such as husky's, is never overwritten; `init` tells you the one line to add to it.
 
 Commit the files: every clone and worktree needs them.
 
@@ -301,7 +301,7 @@ To deploy against a real gateway:
 
 Everything lives in the repo and is committed, so the whole team gets it:
 
-- **Hooks.** In `.claude/settings.json`, `SessionStart`, `UserPromptSubmit`, `FileChanged`, and `CwdChanged` all run `node .tokens-per-ticket/tpt.mjs hook` (source: `src/cli/hook.ts`). The hook reports the session, keeps `.git/HEAD` watched, names the session after its ticket unless you named it yourself, and warns once when something is missing. It never blocks. Each run takes about 60 ms, and it only calls the registry when something changed or every 10 minutes.
+- **Hooks.** In `.claude/settings.json`, `SessionStart`, `UserPromptSubmit`, `FileChanged`, and `CwdChanged` all run `tpt hook` (source: `src/cli/hook.ts`), from the copy of the CLI kept in `.git`. The hook reports the session, keeps `.git/HEAD` watched, names the session after its ticket unless you named it yourself, and warns once when something is missing. It never blocks. Each run takes about 60 ms, and it only calls the registry when something changed or every 10 minutes.
 - **`/ticket-cost`** runs the report and adds up to three observations the numbers support. It posts to Linear only when you ask.
 - **`/ticket-start ENG-123 title`** prepares a separate worktree and gives you the command to paste.
 
@@ -312,7 +312,11 @@ Everything lives in the repo and is committed, so the whole team gets it:
 - **Why a registry.** Claude Code has no way to change API request headers during a session. The only header helpers are for OpenTelemetry and plugin downloads ([settings](https://code.claude.com/docs/en/settings)). A session-to-ticket map read by the gateway is the smallest thing that follows branch switches.
 - **No key leaves the laptop through the hook.** Hooks send `sha256(sha256(key))`, not the key. LiteLLM stores a key as `sha256(key)` and rejects that hash as a credential; the extra round gives a fingerprint the plugin can recompute from the calling key's stored hash, and that works nowhere as a credential. A session belongs to the first fingerprint that reports it, and the plugin only tags calls from the matching key, so a report can only ever attribute the reporter's own calls. Only the gateway, with `TPT_REGISTRY_TOKEN`, can read sessions.
 - **The registry URL comes from trusted config.** `TPT_REGISTRY_URL` belongs in the user's or the organization's Claude Code settings. The repo's `automation.registry_url` is a default a branch could change, so it's used only when it's on the same host as the user's own `ANTHROPIC_BASE_URL`, and ignored with a warning otherwise.
-- **What runs on commit.** The `prepare-commit-msg` hook runs a copy of the CLI kept in the git directory (`.git/tokens-per-ticket/tpt.mjs`), never the checkout's file, so checking out a branch can't change the code that runs when you commit. `tpt init` writes that copy, and so does the Claude Code session hook, which Claude Code runs only in folders you've trusted. Hooks in `.claude/settings.json` follow [Claude Code's own trust model](https://code.claude.com/docs/en/permissions): a repository's committed settings decide what they run, as with any project hook, so review changes to `.claude/` and `.tokens-per-ticket/` like any other code.
+- **Which code the hooks run.** Neither the Claude Code hooks nor the git hook run the checkout's `.tokens-per-ticket/tpt.mjs` once a clone is set up. They run a copy in the git directory (`.git/tokens-per-ticket/tpt.mjs`), so a branch that swaps the bundle changes nothing that runs.
+  - **Creation.** The copy is made the first time a hook runs in a clone, from the branch that clone started on.
+  - **Updates.** Only an explicit `tpt init` replaces it.
+  - **A different bundle on a branch.** The session hook says so and keeps using the copy.
+  - **What this doesn't cover.** `.claude/settings.json` is committed too, so a branch can still change the hook *commands* themselves. That is [Claude Code's trust model](https://code.claude.com/docs/en/permissions) for any project hook: review changes to `.claude/` like any other code.
 - **When tags can be wrong for a moment.**
   - The plugin caches a session for 2 seconds.
   - A `FileChanged` event can arrive a moment after the call that followed the switch.

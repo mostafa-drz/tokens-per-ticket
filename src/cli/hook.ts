@@ -84,17 +84,20 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const explicit = explicitTicket(env.ANTHROPIC_CUSTOM_HEADERS, contract);
 
   const startEvent = event === "SessionStart" || event === "CwdChanged";
+  let cliNotice: string | undefined;
   if (startEvent) {
-    // Claude Code runs this repo's hooks only in folders the user trusted, so
-    // this is the one place allowed to refresh the copy the git hook runs.
-    refreshTrustedCli(root);
+    // Create the trusted copy the hooks run, only if this clone has none yet.
+    // A branch with a different CLI is reported, never copied or run.
+    if (refreshTrustedCli(root, { replace: false }) === "differs" && event === "SessionStart") {
+      cliNotice = `This checkout carries a different ${BUNDLE_PATH} than the copy the hooks run (in .git). The hooks keep using that copy. After reviewing the change, run \`node ${BUNDLE_PATH} init\` to switch to it.`;
+    }
     ensureCommitTrailerHook(root, contract);
   }
 
   const title = event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
 
   // Where calls go and who makes them. Without both, the registry can't help.
-  const problems: string[] = [];
+  const problems: string[] = cliNotice ? [cliNotice] : [];
   if (!env.ANTHROPIC_BASE_URL) problems.push("Claude Code isn't pointed at the LiteLLM gateway (ANTHROPIC_BASE_URL is not set), so no spend from this session reaches it.");
 
   const registry = trustedRegistryUrl({
@@ -238,9 +241,20 @@ function firstLine(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).split("\n")[0];
 }
 
-/** Claude Code settings entries for the hook, merged by `init`. */
+/**
+ * Claude Code settings entries for the hook, merged by `init`.
+ *
+ * The command runs the CLI copy in the git directory, so a branch that swaps
+ * .tokens-per-ticket/tpt.mjs doesn't change what runs. It falls back to the
+ * checkout's file only in a clone that has no copy yet, and that first run
+ * creates the copy. Shell form, because it chooses between two paths; Claude
+ * Code exports CLAUDE_PROJECT_DIR to hook processes in both forms.
+ * https://code.claude.com/docs/en/hooks
+ */
+export const HOOK_COMMAND = `c="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket/tpt.mjs"; [ -f "$c" ] || c="$CLAUDE_PROJECT_DIR/${BUNDLE_PATH}"; node "$c" hook`;
+
 export function hookSettings(): Record<string, unknown[]> {
-  const handler = { type: "command", command: "node", args: [`\${CLAUDE_PROJECT_DIR}/${BUNDLE_PATH}`, "hook"] };
+  const handler = { type: "command", command: HOOK_COMMAND };
   return {
     SessionStart: [{ hooks: [handler] }],
     UserPromptSubmit: [{ hooks: [handler] }],
