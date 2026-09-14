@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { claudeArgs, shellCommand, withTicketTag } from "../../src/lib/launch.ts";
+import { parseContract } from "../../src/lib/contract.ts";
+import { claudeArgs, shellCommand, ticketBranches, withTicketTag } from "../../src/lib/launch.ts";
 import type { TicketDetail } from "../../src/lib/ledger.ts";
 import { REPORT_SIGNATURE, renderReport } from "../../src/lib/report.ts";
 
@@ -15,6 +16,21 @@ describe("withTicketTag", () => {
       withTicketTag(existing, "ticket:ENG-1", "ticket:"),
       "x-team: platform\nx-litellm-tags: team:platform,ticket:ENG-1",
     );
+  });
+});
+
+describe("ticketBranches", () => {
+  const jira = parseContract(`
+key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
+branch: { template: "feature/{KEY}_{slug}" }
+tag: { prefix: "ticket:" }
+worktree: { path: "../{repo}.worktrees/{branch}" }
+`);
+
+  it("finds a branch someone already made for the ticket, whatever its title", () => {
+    const branches = ["main", "feature/PROJ-42_login", "feature/PROJ-420_other", "dependabot/npm_and_yarn/proj-42"];
+    assert.deepEqual(ticketBranches(branches, "PROJ-42", jira), ["feature/PROJ-42_login"]);
+    assert.deepEqual(ticketBranches(branches, "PROJ-7", jira), []);
   });
 });
 

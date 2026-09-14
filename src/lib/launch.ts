@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { findTicketKey, type TicketContract } from "./contract.ts";
 
 /**
  * How `pnpm ticket:start` hands the ticket to Claude Code.
@@ -43,6 +44,15 @@ export function withTicketTag(existingHeaders: string | undefined, tag: string, 
   }
 
   return [...others, `${TAGS_HEADER}: ${[...tags, tag].join(",")}`].join("\n");
+}
+
+/**
+ * The local branches that already name this ticket under the contract, e.g.
+ * one a teammate created by hand or one from an earlier worktree that was
+ * removed. Starting the ticket should continue that branch, not open a second.
+ */
+export function ticketBranches(branches: string[], key: string, contract: TicketContract): string[] {
+  return branches.filter((branch) => findTicketKey(branch, contract) === key);
 }
 
 export function claudeArgs(input: { key: string; headers: string }): string[] {

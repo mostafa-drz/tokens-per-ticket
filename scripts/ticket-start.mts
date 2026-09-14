@@ -21,8 +21,8 @@ import {
   ticketTag,
   worktreePath,
 } from "../src/lib/contract.ts";
-import { branchExists, git, listWorktrees, mainCheckoutRoot, tryGit } from "../src/lib/git.ts";
-import { claudeArgs, shellCommand, userSettingsEnv, withTicketTag } from "../src/lib/launch.ts";
+import { branchExists, git, listWorktrees, localBranches, mainCheckoutRoot, tryGit } from "../src/lib/git.ts";
+import { claudeArgs, shellCommand, ticketBranches, userSettingsEnv, withTicketTag } from "../src/lib/launch.ts";
 
 const USAGE = `Usage: pnpm ticket:start <TICKET-KEY> [short title] [--base <ref>] [--print]
 
@@ -69,17 +69,24 @@ if (existing?.branch) {
   branch = existing.branch;
   console.log(`↺ Reusing worktree for ${key}: ${worktree}`);
 } else {
+  const known = ticketBranches(localBranches(mainRoot), key, contract);
+  if (known.length > 1) {
+    fail(`Several local branches name ${key}: ${known.join(", ")}. Delete or rename all but one, then run this again.`);
+  }
+
   const user = process.env.TICKET_USER ?? tryGit(["config", "user.name"]) ?? os.userInfo().username;
-  branch = branchName({ user, key, slug: title }, contract);
+  branch = known[0] ?? branchName({ user, key, slug: title }, contract);
   worktree = worktreePath({ repoRoot: mainRoot, branch }, contract);
   if (existsSync(worktree)) fail(`${worktree} already exists but is not a worktree for ${key}. Move it first.`);
 
   if (branchExists(branch, mainRoot)) {
     git(["worktree", "add", worktree, branch], mainRoot);
+    console.log(`✓ Using existing branch ${branch}`);
   } else {
     git(["worktree", "add", "-b", branch, worktree, values.base ?? "HEAD"], mainRoot);
+    console.log(`✓ Created ${branch}`);
   }
-  console.log(`✓ Created ${branch}\n✓ Worktree ${worktree}`);
+  console.log(`✓ Worktree ${worktree}`);
   console.log("  Run `pnpm install` there before running the app or tests.");
 }
 

@@ -40,6 +40,10 @@ export function listWorktrees(cwd?: string): Worktree[] {
   return worktrees;
 }
 
+export function localBranches(cwd?: string): string[] {
+  return git(["for-each-ref", "--format=%(refname:short)", "refs/heads"], cwd).split("\n").filter(Boolean);
+}
+
 export function branchExists(branch: string, cwd?: string): boolean {
   return tryGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], cwd) !== null;
 }
