@@ -4,6 +4,8 @@
 # This is the one file a team edits to adopt the repo. The code reads it;
 # nothing about Linear, team keys, or branch shape is hard-coded.
 
+# Where `pnpm ticket:report --post` writes. Only "linear" is supported; set
+# anything else (e.g. jira) and --post refuses instead of querying Linear.
 tracker: linear
 
 key:

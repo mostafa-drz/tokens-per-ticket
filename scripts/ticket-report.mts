@@ -12,7 +12,7 @@ import { findTicketKey, loadContract, normalizeTicketKey, ticketTag } from "../s
 import { loadEnvLocal } from "../src/lib/env.ts";
 import { currentBranch, mainCheckoutRoot, tryGit } from "../src/lib/git.ts";
 import { summarizeTicket } from "../src/lib/ledger.ts";
-import { upsertReportComment } from "../src/lib/linear.ts";
+import { postUnsupportedReason, upsertReportComment } from "../src/lib/linear.ts";
 import { fetchTagActivity, lastDays } from "../src/lib/litellm.ts";
 import { renderReport } from "../src/lib/report.ts";
 
@@ -51,6 +51,11 @@ const key = positionals[0]
   ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key.`))
   : ((branch && findTicketKey(branch, contract)) ??
     fail(`Branch "${branch ?? "(detached)"}" doesn't name a ticket. Pass a key: pnpm ticket:report ENG-123`));
+
+if (values.post) {
+  const reason = postUnsupportedReason(contract.tracker);
+  if (reason) fail(reason);
+}
 
 const days = Number.parseInt(values.days, 10);
 if (!Number.isInteger(days) || days < 1) fail("--days must be a positive whole number.");

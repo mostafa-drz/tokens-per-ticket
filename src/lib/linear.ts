@@ -18,7 +18,16 @@ export class LinearError extends Error {
   }
 }
 
-type LinearConfig = { apiKey: string; fetch?: typeof fetch };
+/**
+ * `--post` only knows Linear. For any other `tracker` in the contract, returns
+ * why posting is refused, so a Jira key is never looked up in Linear.
+ */
+export function postUnsupportedReason(tracker: string): string | null {
+  if (tracker.trim().toLowerCase() === "linear") return null;
+  return `--post writes to Linear only, but ticket-contract.yaml sets tracker: ${tracker}. Run without --post and paste the report into your tracker.`;
+}
+
+type LinearConfig ={ apiKey: string; fetch?: typeof fetch };
 
 async function graphql<T>(config: LinearConfig, query: string, variables: Record<string, unknown>): Promise<T> {
   const response = await (config.fetch ?? fetch)(ENDPOINT, {

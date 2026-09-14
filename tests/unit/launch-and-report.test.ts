@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { parseContract } from "../../src/lib/contract.ts";
 import { claudeArgs, shellCommand, ticketBranches, withTicketTag } from "../../src/lib/launch.ts";
 import type { TicketDetail } from "../../src/lib/ledger.ts";
+import { postUnsupportedReason } from "../../src/lib/linear.ts";
 import { REPORT_SIGNATURE, renderReport } from "../../src/lib/report.ts";
 
 describe("withTicketTag", () => {
@@ -89,5 +90,14 @@ describe("renderReport", () => {
   it("carries the signature used to update the Linear comment in place", () => {
     assert.ok(report.includes(REPORT_SIGNATURE));
     assert.match(report, /ticket:ENG-1/);
+  });
+});
+
+describe("postUnsupportedReason", () => {
+  it("allows posting for Linear and refuses any other tracker with a way forward", () => {
+    assert.equal(postUnsupportedReason("linear"), null);
+    const reason = postUnsupportedReason("jira");
+    assert.match(reason ?? "", /Linear only/);
+    assert.match(reason ?? "", /tracker: jira/);
   });
 });

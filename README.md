@@ -188,7 +188,7 @@ pnpm ticket:report                  # the ticket of the current branch, last 30 
 pnpm ticket:report ENG-123 --post   # also create or update the comment on the Linear ticket
 ```
 
-`--post` needs a Linear personal API key in `LINEAR_API_KEY`. It keeps exactly one report comment per ticket and updates it on every run. Run it at PR time, on a schedule, or before a retro.
+`--post` writes to Linear only, and needs `tracker: linear` in the contract and a Linear personal API key in `LINEAR_API_KEY` (in the main checkout's `.env.local`; the script finds it from ticket worktrees too). With any other tracker, run the report without `--post` and paste it into the ticket. It keeps exactly one report comment per ticket and updates it on every run. Run it at PR time, on a schedule, or before a retro.
 
 ![A ticket in the ledger: spend per day and by model](docs/ticket.png)
 
