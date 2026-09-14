@@ -1,5 +1,5 @@
 /**
- * pnpm ticket:start ENG-123 "checkout flow"
+ * pnpm ticket:start ENG-123 "checkout flow"   (npm: npm run ticket:start -- ENG-123 "checkout flow")
  *
  * Starts work on a ticket the way the contract expects:
  *   1. a branch named by ticket-contract.yaml
@@ -23,8 +23,17 @@ import {
 } from "../src/lib/contract.ts";
 import { branchExists, git, listWorktrees, localBranches, mainCheckoutRoot, tryGit } from "../src/lib/git.ts";
 import { claudeArgs, shellCommand, ticketBranches, userSettingsEnv, withTicketTag } from "../src/lib/launch.ts";
+import {
+  detectPackageManager,
+  flagsTakenByNpm,
+  installCommand,
+  scriptCommand,
+} from "../src/lib/package-manager.ts";
 
-const USAGE = `Usage: pnpm ticket:start <TICKET-KEY> [short title] [--base <ref>] [--print]
+const manager = detectPackageManager(tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd());
+const run = (...args: string[]) => scriptCommand(manager, "ticket:start", args);
+
+const USAGE = `Usage: ${run("<TICKET-KEY>", "[short title]", "[--base <ref>]", "[--print]")}
 
   --base <ref>   Branch point for a new branch (default: HEAD of the main checkout)
   --print        Create the worktree and print the claude command instead of launching it`;
@@ -32,6 +41,16 @@ const USAGE = `Usage: pnpm ticket:start <TICKET-KEY> [short title] [--base <ref>
 function fail(message: string): never {
   console.error(`\n✖ ${message}\n`);
   process.exit(1);
+}
+
+// npm keeps flags written before `--` for itself. Without this check
+// `npm run ticket:start ENG-1 --print` would launch claude instead of printing,
+// and `--base origin/main` would silently become part of the title.
+const taken = flagsTakenByNpm(["print", "base", "help"]);
+if (taken.length) {
+  fail(
+    `npm kept ${taken.map((flag) => `--${flag}`).join(", ")} for itself. Put the arguments after --:\n  ${run("<TICKET-KEY>", "[short title]", `--${taken[0]}`)}`,
+  );
 }
 
 const { values, positionals } = parseArgs({
@@ -79,6 +98,18 @@ if (existing?.branch) {
   worktree = worktreePath({ repoRoot: mainRoot, branch }, contract);
   if (existsSync(worktree)) fail(`${worktree} already exists but is not a worktree for ${key}. Move it first.`);
 
+  // A new worktree only has committed files. Without the contract and the
+  // hook in the commit it starts from, nothing in it can attribute the ticket.
+  const startRef = branchExists(branch, mainRoot) ? branch : (values.base ?? "HEAD");
+  const missing = ["ticket-contract.yaml", ".claude/hooks/ticket-guard.mjs"].filter(
+    (file) => tryGit(["cat-file", "-e", `${startRef}:${file}`], mainRoot) === null,
+  );
+  if (missing.length) {
+    fail(
+      `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not committed on ${startRef}, so the ticket worktree would not have ${missing.length > 1 ? "them" : "it"}. Commit the tokens-per-ticket files first, then run this again.`,
+    );
+  }
+
   if (branchExists(branch, mainRoot)) {
     git(["worktree", "add", worktree, branch], mainRoot);
     console.log(`✓ Using existing branch ${branch}`);
@@ -87,7 +118,7 @@ if (existing?.branch) {
     console.log(`✓ Created ${branch}`);
   }
   console.log(`✓ Worktree ${worktree}`);
-  console.log("  Run `pnpm install` there before running the app or tests.");
+  console.log(`  Run \`${installCommand(manager)}\` there before running the app, the tests, or the SessionStart hook.`);
 }
 
 // 3. Launch Claude Code with the ticket tag.

@@ -14,9 +14,13 @@ import { currentBranch, mainCheckoutRoot, tryGit } from "../src/lib/git.ts";
 import { summarizeTicket } from "../src/lib/ledger.ts";
 import { postUnsupportedReason, upsertReportComment } from "../src/lib/linear.ts";
 import { fetchTagActivity, lastDays } from "../src/lib/litellm.ts";
+import { detectPackageManager, flagsTakenByNpm, scriptCommand } from "../src/lib/package-manager.ts";
 import { renderReport } from "../src/lib/report.ts";
 
-const USAGE = `Usage: pnpm ticket:report [TICKET-KEY] [--days <n>] [--post]
+const manager = detectPackageManager(tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd());
+const run = (...args: string[]) => scriptCommand(manager, "ticket:report", args);
+
+const USAGE = `Usage: ${run("[TICKET-KEY]", "[--days <n>]", "[--post]")}
 
   --days <n>   Look back this many days, today included (default 30)
   --post       Create or update the report comment on the Linear ticket
@@ -26,6 +30,13 @@ Environment (.env.local here or in the main checkout): LITELLM_BASE_URL, LITELLM
 function fail(message: string): never {
   console.error(`\n✖ ${message}\n`);
   process.exit(1);
+}
+
+// npm keeps flags written before `--` for itself: `npm run ticket:report
+// ENG-1 --post` would print the report, skip Linear, and exit 0.
+const taken = flagsTakenByNpm(["post", "days", "help"]);
+if (taken.length) {
+  fail(`npm kept ${taken.map((flag) => `--${flag}`).join(", ")} for itself. Put the arguments after --:\n  ${run("ENG-123", `--${taken[0]}`)}`);
 }
 
 const { values, positionals } = parseArgs({
@@ -42,6 +53,10 @@ if (values.help) {
   process.exit(0);
 }
 
+// A stray second positional is usually the value of a flag npm ate
+// (`--days 60` before `--`). Refuse it rather than use the default.
+if (positionals.length > 1) fail(`Unexpected argument "${positionals[1]}".\n\n${USAGE}`);
+
 const mainRoot = mainCheckoutRoot();
 // Ticket worktrees have no .env.local of their own (it's gitignored).
 loadEnvLocal([tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd(), mainRoot]);
@@ -50,7 +65,7 @@ const branch = currentBranch();
 const key = positionals[0]
   ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key.`))
   : ((branch && findTicketKey(branch, contract)) ??
-    fail(`Branch "${branch ?? "(detached)"}" doesn't name a ticket. Pass a key: pnpm ticket:report ENG-123`));
+    fail(`Branch "${branch ?? "(detached)"}" doesn't name a ticket. Pass a key: ${run("ENG-123")}`));
 
 if (values.post) {
   const reason = postUnsupportedReason(contract.tracker);
@@ -72,7 +87,7 @@ try {
   if (!detail) {
     console.log(
       `\nNo spend recorded for ${key} (tag ${tag}) between ${range.startDate} and ${range.endDate}.\n` +
-        "If you worked on it, check that Claude Code was started with `pnpm ticket:start` and points at the gateway.\n" +
+        `If you worked on it, check that Claude Code was started with \`${scriptCommand(manager, "ticket:start", [key])}\` and points at the gateway.\n` +
         "LiteLLM also writes spend in batches, so calls from the last minute may not show yet.\n",
     );
     process.exit(0);
