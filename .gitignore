@@ -43,3 +43,7 @@ next-env.d.ts
 # gateway secrets
 gateway/.env
 !.env.example
+
+# playwright
+/test-results/
+/playwright-report/
