@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Claude Code agent worktrees are full copies of the repo.
+    ".claude/worktrees/**",
   ]),
 ]);
 
