@@ -155,17 +155,30 @@ While a gateway credential is active, Claude Code bills per token to whoever own
 |---|---|
 | `ticket-contract.yaml` | branch and tag rules |
 | `scripts/ticket-start.mts`, `scripts/ticket-report.mts` | the two commands |
-| `src/lib/{contract,env,format,git,launch,ledger,linear,litellm,report}.ts` | what the scripts import; none of them import Next.js |
-| `.claude/hooks/ticket-guard.mjs`, `.claude/skills/ticket-start`, `.claude/skills/ticket-cost`, and the `hooks` block of `.claude/settings.json` | the Claude Code integration |
+| `src/lib/{contract,env,format,git,launch,ledger,linear,litellm,package-manager,report}.ts` | what the scripts and the hook import; none of them import Next.js |
+| `.claude/hooks/ticket-guard.mjs`, `.claude/skills/ticket-start`, `.claude/skills/ticket-cost` | the Claude Code integration |
+| the `hooks` block of `.claude/settings.json` | **merge** it into the repo's existing `.claude/settings.json`; don't copy the file over it, or you lose that repo's permissions |
 
-Then add the dev dependencies `tsx`, `yaml`, and `zod`, and the two scripts to `package.json`:
+Then add the two scripts to `package.json`:
 
 ```json
 "ticket:start": "node --import tsx scripts/ticket-start.mts",
 "ticket:report": "node --import tsx scripts/ticket-report.mts"
 ```
 
-If `src/lib` is taken in that repo, put the files elsewhere and update the imports in the scripts and the `src/lib/contract.ts` path in the hook. Each developer puts `LITELLM_BASE_URL` and `LITELLM_API_KEY` in that repo's `.env.local` (see `.env.example`), and `LINEAR_API_KEY` if they post reports. The scripts also read the main checkout's `.env.local` when run inside a ticket worktree, which never has its own.
+and the dev dependencies `tsx`, `yaml`, and `zod` (`npm install -D tsx yaml zod`, or your package manager's equivalent). If the repo already depends on `yaml` or `zod`, install only what's missing: `npm install -D zod` moves an existing runtime `zod` into `devDependencies` and upgrades it to v4. The helpers work with the `zod` 3.25 and 4 checked here.
+
+Check these before you commit, because they break a product repo that already has its own `src/lib` and TypeScript build:
+
+- **Name clashes.** `src/lib/env.ts`, `format.ts`, or `git.ts` may already exist. Copying overwrites them without a word. If anything clashes, put the helpers in their own folder (for example `src/lib/tokens-per-ticket/`), then update the `../src/lib/` imports in both scripts and `LIB_DIR` at the top of the hook.
+- **Your `tsc` build.** The helpers import each other with `.ts` extensions, which Node needs to run them through tsx. A `tsconfig.json` that includes them fails with `TS5097: An import path can only end with a '.ts' extension`. Either exclude the helpers' folder from the build, or set [`rewriteRelativeImportExtensions`](https://www.typescriptlang.org/tsconfig/#rewriteRelativeImportExtensions) (TypeScript 5.7+), or `allowImportingTsExtensions` if the repo only type-checks with `noEmit`.
+- **`.env.local` is gitignored.** It holds the gateway key.
+
+**Commit these files** to the branch new work starts from before you start a ticket. A ticket worktree only gets committed files, so without them it has no contract, hook, or scripts. `ticket:start` refuses to create one in that case.
+
+Each developer puts `LITELLM_BASE_URL` and `LITELLM_API_KEY` in that repo's `.env.local` (see `.env.example` here), and `LINEAR_API_KEY` if they post reports. The scripts also read the main checkout's `.env.local` when run inside a ticket worktree, which never has its own.
+
+**On npm, put arguments after `--`**: `npm run ticket:start -- ENG-123 --print`, `npm run ticket:report -- ENG-123 --post`. npm keeps flags written before `--` for itself ([npm run](https://docs.npmjs.com/cli/v11/commands/npm-run)). The scripts stop with that hint when they notice, and their messages, the hook, and the skills use the repo's package manager. The `pnpm` commands below become `npm run <script> -- <args>`.
 
 ### 5. Adopt the ticket contract
 
@@ -185,7 +198,7 @@ This:
 
 Running it again for the same ticket reuses the worktree. Use `--print` to get the command without launching, and `--base origin/main` to choose where a new branch starts.
 
-A new worktree has no `node_modules`, and the `SessionStart` hook skips its checks until it does. For the check on the first session, run `pnpm ticket:start ENG-123 --print`, then `pnpm install` in the worktree, then paste the printed command.
+A new worktree has no `node_modules`, and the `SessionStart` hook skips its checks until it does. For the check on the first session, run `pnpm ticket:start ENG-123 --print` (npm: `npm run ticket:start -- ENG-123 --print`), then install dependencies in the worktree, then paste the printed command.
 
 ### 7. See what it cost
 
