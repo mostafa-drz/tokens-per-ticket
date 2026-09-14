@@ -136,3 +136,32 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
     );
   });
 });
+
+describe("automation settings", () => {
+  const base = `
+key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
+branch: { template: "{user}/{key}-{slug}" }
+tag: { prefix: "ticket:" }
+worktree: { path: "../{repo}.worktrees/{branch}" }
+`;
+
+  it("turns session tracking and the commit trailer on when the section is missing", () => {
+    const contract = parseContract(base);
+    assert.equal(contract.automation.sessions, true);
+    assert.equal(contract.automation.commit_trailer, "Ticket");
+    assert.equal(contract.automation.registry_url, undefined);
+  });
+
+  it("reads the repo's automation section", () => {
+    assert.deepEqual(loadContract().automation, {
+      sessions: true,
+      registry_url: "http://localhost:4100",
+      commit_trailer: "Ticket",
+    });
+  });
+
+  it("rejects a trailer name git would not accept", () => {
+    assert.throws(() => parseContract(`${base}\nautomation: { commit_trailer: "Ticket id" }`));
+    assert.equal(parseContract(`${base}\nautomation: { commit_trailer: false }`).automation.commit_trailer, false);
+  });
+});

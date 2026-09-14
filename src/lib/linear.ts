@@ -24,7 +24,7 @@ export class LinearError extends Error {
  */
 export function postUnsupportedReason(tracker: string): string | null {
   if (tracker.trim().toLowerCase() === "linear") return null;
-  return `--post writes to Linear only, but ticket-contract.yaml sets tracker: ${tracker}. Run without --post and paste the report into your tracker.`;
+  return `--post writes to Linear only, but tokens-per-ticket.yaml sets tracker: ${tracker}. Run without --post and paste the report into your tracker.`;
 }
 
 type LinearConfig ={ apiKey: string; fetch?: typeof fetch };

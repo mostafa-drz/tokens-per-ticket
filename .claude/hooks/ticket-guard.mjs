@@ -63,7 +63,7 @@ try {
   const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
   respond({
     context: `tokens-per-ticket: the ticket check could not run: ${reason}`,
-    warning: `tokens-per-ticket hook could not load ${LIB_DIR}/contract.ts, ${LIB_DIR}/package-manager.ts, or ticket-contract.yaml from ${projectDir}: ${reason}`,
+    warning: `tokens-per-ticket hook could not load ${LIB_DIR}/contract.ts, ${LIB_DIR}/package-manager.ts, or tokens-per-ticket.yaml from ${projectDir}: ${reason}`,
   });
 }
 
@@ -122,7 +122,7 @@ if (branchKey && sessionKey !== branchKey) {
 
 if (sessionKey) {
   respond({
-    context: `tokens-per-ticket: this session bills ${sessionKey}, but branch "${branch || "(none)"}" doesn't follow ticket-contract.yaml.`,
+    context: `tokens-per-ticket: this session bills ${sessionKey}, but branch "${branch || "(none)"}" doesn't follow tokens-per-ticket.yaml.`,
     warning: `Session bills ${sessionKey}, but the branch doesn't name it. Commits here won't link back to the ticket.`,
     title: sessionKey,
   });

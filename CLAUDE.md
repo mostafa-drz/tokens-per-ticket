@@ -25,7 +25,7 @@ pnpm gateway:smoke  # prove tagged spend flows
   check the LiteLLM docs and source. Add code here only for the gaps: contract, launcher, hook,
   Linear write-back, ledger UI.
 - **The contract is config.** Nothing about branch shape, team keys, or the tracker is
-  hard-coded. It all goes through `ticket-contract.yaml` and `src/lib/contract.ts`.
+  hard-coded. It all goes through `tokens-per-ticket.yaml` and `src/lib/contract.ts`.
 - **One ticket per session and per worktree.** Never switch branches in a checkout that has
   uncommitted changes. Use `pnpm ticket:start <KEY>`.
 - **Keep `src/lib` free of Next.js imports**, except `data.ts` and `review.ts`. The CLI scripts

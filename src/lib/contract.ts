@@ -4,7 +4,8 @@ import { parse } from "yaml";
 import { z } from "zod";
 
 /**
- * The ticket contract: branch name -> ticket key -> spend tag.
+ * The ticket contract (tokens-per-ticket.yaml): branch name -> ticket key ->
+ * spend tag, plus how much of it runs automatically.
  *
  * Kept free of Next.js imports so the CLI scripts, the Claude Code hook,
  * and the app all share one implementation.
@@ -32,11 +33,22 @@ const ContractSchema = z.object({
   worktree: z.object({
     path: z.string().min(1),
   }),
+  // Automatic attribution: Claude Code hooks report which ticket each session
+  // is on, and the gateway tags every call. No command for engineers to run.
+  automation: z
+    .object({
+      sessions: z.boolean().default(true),
+      // The session registry that runs next to LiteLLM. TPT_REGISTRY_URL overrides it.
+      registry_url: z.string().url().optional(),
+      // Git trailer added to commits on ticket branches, or false for none.
+      commit_trailer: z.union([z.string().regex(/^[A-Za-z][A-Za-z0-9-]*$/), z.literal(false)]).default("Ticket"),
+    })
+    .prefault({}),
 });
 
 export type TicketContract = z.infer<typeof ContractSchema>;
 
-export const CONTRACT_FILE = "ticket-contract.yaml";
+export const CONTRACT_FILE = "tokens-per-ticket.yaml";
 
 export function parseContract(source: string): TicketContract {
   return ContractSchema.parse(parse(source));

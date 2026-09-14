@@ -33,7 +33,7 @@ function productRepo(dir: string, { withLib }: { withLib: boolean }): string {
   const root = path.join(dir, withLib ? "with-lib" : "without-lib");
   mkdirSync(path.join(root, "src"), { recursive: true });
   execFileSync("git", ["init", "-q", "-b", "jane/eng-123-retry"], { cwd: root });
-  copyFileSync(path.join(repo, "ticket-contract.yaml"), path.join(root, "ticket-contract.yaml"));
+  copyFileSync(path.join(repo, "tokens-per-ticket.yaml"), path.join(root, "tokens-per-ticket.yaml"));
   writeFileSync(path.join(root, "package.json"), "{}");
   writeFileSync(path.join(root, "package-lock.json"), "{}");
   if (withLib) symlinkSync(path.join(repo, "src/lib"), path.join(root, "src/lib"));

@@ -68,7 +68,7 @@ The rule for this repo: **don't rebuild what the gateway already does.**
 | Group requests by Claude Code session | LiteLLM detects `x-claude-code-session-id` on its own ([request headers](https://docs.litellm.ai/docs/proxy/request_headers)) |
 | Budgets per developer key | LiteLLM virtual keys with `max_budget` ([virtual keys](https://docs.litellm.ai/docs/proxy/virtual_keys)) |
 | Budget alerts, weekly spend reports per tag | LiteLLM alerting ([alerting](https://docs.litellm.ai/docs/proxy/alerting)) |
-| **Branch name → ticket key**, configurable per team | **This repo:** `ticket-contract.yaml` + `src/lib/contract.ts` |
+| **Branch name → ticket key**, configurable per team | **This repo:** `tokens-per-ticket.yaml` + `src/lib/contract.ts` |
 | **One session = one ticket**, launched with the right tag | **This repo:** `pnpm ticket:start` |
 | **A warning when branch and tag disagree** | **This repo:** a Claude Code `SessionStart` hook |
 | **The cost on the ticket** | **This repo:** `pnpm ticket:report --post` (one Linear comment, updated in place) |
@@ -172,7 +172,7 @@ While a gateway credential is active, Claude Code bills per token to whoever own
 
 | Copy | Why |
 |---|---|
-| `ticket-contract.yaml` | branch and tag rules |
+| `tokens-per-ticket.yaml` | branch and tag rules |
 | `scripts/ticket-start.mts`, `scripts/ticket-report.mts` | the two commands |
 | `src/lib/{contract,env,format,git,launch,ledger,linear,litellm,package-manager,report}.ts` | what the scripts and the hook import; none of them import Next.js |
 | `.claude/hooks/ticket-guard.mjs`, `.claude/skills/ticket-start`, `.claude/skills/ticket-cost` | the Claude Code integration |
@@ -201,7 +201,7 @@ Check these before you commit, because they break a product repo that already ha
 
 ### 5. Adopt the ticket contract
 
-The defaults follow Linear's branch names (`mostafa/eng-123-retry-checkout-on-429`). If your branches look different, edit [`ticket-contract.yaml`](#the-ticket-contract) first, then **commit it to the branch new work starts from**. `ticket:start` reads the contract in your main checkout, but each ticket worktree, and the hook running in it, reads the committed copy. An uncommitted edit makes the hook warn that the branch it just created "doesn't follow ticket-contract.yaml".
+The defaults follow Linear's branch names (`mostafa/eng-123-retry-checkout-on-429`). If your branches look different, edit [`tokens-per-ticket.yaml`](#the-ticket-contract) first, then **commit it to the branch new work starts from**. `ticket:start` reads the contract in your main checkout, but each ticket worktree, and the hook running in it, reads the committed copy. An uncommitted edit makes the hook warn that the branch it just created "doesn't follow tokens-per-ticket.yaml".
 
 ### 6. Start a ticket
 
@@ -234,7 +234,7 @@ pnpm ticket:report ENG-123 --post   # also create or update the comment on the L
 
 ## The ticket contract
 
-`ticket-contract.yaml` is the one file a team edits to adopt this repo:
+`tokens-per-ticket.yaml` is the one file a team edits to adopt this repo:
 
 ```yaml
 tracker: linear                       # where ticket:report --post writes (Linear only)
@@ -285,7 +285,7 @@ To deploy against a real gateway:
 2. Set `LEDGER_BASIC_AUTH`. The app refuses to show live data in production without it, because the ledger shows the whole organization's spend.
 3. For more than a team demo, put it behind [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection) or your SSO as well.
 
-`ticket-contract.yaml` is read at request time and included in every function through `outputFileTracingIncludes` in `next.config.ts`.
+`tokens-per-ticket.yaml` is read at request time and included in every function through `outputFileTracingIncludes` in `next.config.ts`.
 
 ---
 
@@ -324,7 +324,7 @@ pnpm lint
 ```
 
 ```
-ticket-contract.yaml     the one file a team edits
+tokens-per-ticket.yaml     the one file a team edits
 gateway/                 LiteLLM + Postgres (docker compose), config, env example
 scripts/                 ticket:start, ticket:report, gateway:smoke
 src/lib/                 contract, LiteLLM client, ledger math, report, Linear, launcher

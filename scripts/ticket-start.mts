@@ -2,7 +2,7 @@
  * pnpm ticket:start ENG-123 "checkout flow"   (npm: npm run ticket:start -- ENG-123 "checkout flow")
  *
  * Starts work on a ticket the way the contract expects:
- *   1. a branch named by ticket-contract.yaml
+ *   1. a branch named by tokens-per-ticket.yaml
  *   2. its own git worktree (your current checkout is never switched)
  *   3. Claude Code launched in that worktree, tagging every model call
  *      with ticket:ENG-123
@@ -73,7 +73,7 @@ const contract = loadContract(mainRoot);
 
 const key =
   normalizeTicketKey(positionals[0], contract) ??
-  fail(`"${positionals[0]}" is not a ticket key. ticket-contract.yaml expects /${contract.key.pattern}/.`);
+  fail(`"${positionals[0]}" is not a ticket key. tokens-per-ticket.yaml expects /${contract.key.pattern}/.`);
 const title = positionals.slice(1).join(" ");
 const tag = ticketTag(key, contract);
 
@@ -101,7 +101,7 @@ if (existing?.branch) {
   // A new worktree only has committed files. Without the contract and the
   // hook in the commit it starts from, nothing in it can attribute the ticket.
   const startRef = branchExists(branch, mainRoot) ? branch : (values.base ?? "HEAD");
-  const missing = ["ticket-contract.yaml", ".claude/hooks/ticket-guard.mjs"].filter(
+  const missing = ["tokens-per-ticket.yaml", ".claude/hooks/ticket-guard.mjs"].filter(
     (file) => tryGit(["cat-file", "-e", `${startRef}:${file}`], mainRoot) === null,
   );
   if (missing.length) {
