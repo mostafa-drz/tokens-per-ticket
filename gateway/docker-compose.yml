@@ -41,8 +41,9 @@ services:
       retries: 5
       start_period: 60s
 
-  # Which ticket each Claude Code session is on. Hooks in your repos report
-  # to it with the developer's gateway key; the gateway plugin reads it.
+  # Which ticket each Claude Code session is on. Hooks in your repos report to
+  # it with a fingerprint of the developer's key (never the key); the gateway
+  # plugin reads it.
   registry:
     build: ../registry
     ports:
@@ -51,7 +52,6 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
-      LITELLM_URL: http://litellm:4000
     depends_on:
       db:
         condition: service_healthy

@@ -1,5 +1,4 @@
 import pg from "pg";
-import { liteLLMKeyValidator } from "./litellm-auth.mjs";
 import { createServer } from "./server.mjs";
 import { postgresStore } from "./store.mjs";
 
@@ -16,7 +15,6 @@ const pool = new pg.Pool({ connectionString: required("DATABASE_URL"), max: 5 })
 const store = await postgresStore(pool, { retentionDays: Number(process.env.TPT_RETENTION_DAYS ?? 90) });
 const server = createServer({
   store,
-  validateKey: liteLLMKeyValidator({ baseUrl: required("LITELLM_URL") }),
   internalToken: required("TPT_REGISTRY_TOKEN"),
   log: (line) => console.log(`registry: ${line}`),
 });

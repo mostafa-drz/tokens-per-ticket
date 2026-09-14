@@ -26,8 +26,7 @@ export async function postgresStore(pool, { retentionDays = 90 } = {}) {
       ticket     text,
       branch     text,
       repo       text,
-      key_token  text NOT NULL,
-      key_alias  text,
+      key_fingerprint text NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE IF NOT EXISTS tpt_session_events (
@@ -38,7 +37,6 @@ export async function postgresStore(pool, { retentionDays = 90 } = {}) {
       branch     text,
       repo       text,
       head       text,
-      key_alias  text,
       created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS tpt_session_events_session ON tpt_session_events (session_id, created_at);
@@ -49,24 +47,24 @@ export async function postgresStore(pool, { retentionDays = 90 } = {}) {
   return {
     async get(id) {
       const { rows } = await pool.query(
-        "SELECT session_id, ticket, branch, repo, key_token, key_alias, updated_at FROM tpt_sessions WHERE session_id = $1",
+        "SELECT session_id, ticket, branch, repo, key_fingerprint, updated_at FROM tpt_sessions WHERE session_id = $1",
         [id],
       );
       return rows[0] ?? null;
     },
     async put(r) {
       await pool.query(
-        `INSERT INTO tpt_sessions (session_id, ticket, branch, repo, key_token, key_alias, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())
+        `INSERT INTO tpt_sessions (session_id, ticket, branch, repo, key_fingerprint, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now())
          ON CONFLICT (session_id) DO UPDATE
-           SET ticket = EXCLUDED.ticket, branch = EXCLUDED.branch, repo = EXCLUDED.repo,
-               key_alias = EXCLUDED.key_alias, updated_at = now()`,
-        [r.session_id, r.ticket, r.branch, r.repo, r.key_token, r.key_alias],
+           SET ticket = EXCLUDED.ticket, branch = EXCLUDED.branch, repo = EXCLUDED.repo, updated_at = now()
+         WHERE tpt_sessions.key_fingerprint = EXCLUDED.key_fingerprint`,
+        [r.session_id, r.ticket, r.branch, r.repo, r.key_fingerprint],
       );
       await pool.query(
-        `INSERT INTO tpt_session_events (session_id, event, ticket, branch, repo, head, key_alias)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [r.session_id, r.event, r.ticket, r.branch, r.repo, r.head, r.key_alias],
+        `INSERT INTO tpt_session_events (session_id, event, ticket, branch, repo, head)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [r.session_id, r.event, r.ticket, r.branch, r.repo, r.head],
       );
     },
   };

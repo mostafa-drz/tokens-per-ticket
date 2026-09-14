@@ -3,20 +3,27 @@ import http from "node:http";
 /**
  * The session registry: which ticket each Claude Code session is working on.
  *
- * Writers are Claude Code hooks on developer machines. They authenticate with
- * the developer's own gateway key, so there is no new credential to hand out.
- * The one reader is the gateway plugin (gateway/tokens_per_ticket.py), which
- * authenticates with a shared internal token and tags each model call.
+ * Writers are Claude Code hooks on developer machines. They never send the
+ * gateway key: only `key_fingerprint`, sha256(sha256(key)). LiteLLM stores a
+ * key as sha256(key) and refuses that hash as a credential, and the extra
+ * round means the fingerprint is not even that stored hash. A session belongs
+ * to the fingerprint that first reports it, and the gateway plugin only tags a
+ * call whose key produces the same fingerprint, so a write can only ever
+ * attribute the writer's own calls.
  *
- *   POST /v1/sessions        Bearer <developer gateway key>   report a session's ticket
- *   GET  /v1/sessions/:id    Bearer <TPT_REGISTRY_TOKEN>      look one up (gateway only)
+ * The one reader is the gateway plugin (gateway/tokens_per_ticket.py), which
+ * authenticates with a shared internal token.
+ *
+ *   POST /v1/sessions        report a session's ticket (JSON body with key_fingerprint)
+ *   GET  /v1/sessions/:id    Bearer <TPT_REGISTRY_TOKEN>, look one up (gateway only)
  *   GET  /healthz
  */
 
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const FINGERPRINT = /^[0-9a-f]{64}$/;
 const MAX_BODY_BYTES = 8 * 1024;
 
-export function createServer({ store, validateKey, internalToken, log = () => {} }) {
+export function createServer({ store, internalToken, log = () => {} }) {
   if (!internalToken) throw new Error("TPT_REGISTRY_TOKEN is required, so only the gateway can read sessions.");
 
   return http.createServer(async (req, res) => {
@@ -25,21 +32,16 @@ export function createServer({ store, validateKey, internalToken, log = () => {}
       if (req.method === "GET" && url.pathname === "/healthz") return send(res, 200, { ok: true });
 
       if (req.method === "POST" && url.pathname === "/v1/sessions") {
-        const key = bearer(req);
-        if (!key) return send(res, 401, { error: "Send your gateway key as Authorization: Bearer <key>." });
-        const identity = await validateKey(key);
-        if (!identity) return send(res, 401, { error: "The gateway does not recognize this key." });
-
         const report = parseReport(await readBody(req));
         if (typeof report === "string") return send(res, 400, { error: report });
 
         const existing = await store.get(report.session_id);
-        if (existing && existing.key_token !== identity.token) {
+        if (existing && existing.key_fingerprint !== report.key_fingerprint) {
           // A session belongs to the key that first reported it. Anyone else
           // re-pointing it would move a colleague's spend onto another ticket.
           return send(res, 403, { error: "This session was reported with a different key." });
         }
-        await store.put({ ...report, key_token: identity.token, key_alias: identity.alias });
+        await store.put(report);
         log(`session ${report.session_id.slice(0, 8)} ${report.event} → ${report.ticket ?? "(no ticket)"}`);
         res.writeHead(204).end();
         return;
@@ -52,7 +54,7 @@ export function createServer({ store, validateKey, internalToken, log = () => {}
         if (!session) return send(res, 404, { error: "Unknown session." });
         return send(res, 200, {
           ticket: session.ticket,
-          key_token: session.key_token,
+          key_fingerprint: session.key_fingerprint,
           branch: session.branch,
           repo: session.repo,
           updated_at: session.updated_at,
@@ -78,9 +80,11 @@ export function parseReport(body) {
   if (!data || typeof data !== "object") return "Body must be a JSON object.";
   if (typeof data.session_id !== "string" || !SESSION_ID.test(data.session_id)) return "session_id is missing or malformed.";
   const text = (value, max) => (typeof value === "string" && value.length <= max ? value : null);
+  if (typeof data.key_fingerprint !== "string" || !FINGERPRINT.test(data.key_fingerprint)) return "key_fingerprint must be sha256(sha256(gateway key)) in lowercase hex.";
   if (data.ticket !== null && text(data.ticket, 64) === null) return "ticket must be a string of at most 64 characters, or null.";
   return {
     session_id: data.session_id,
+    key_fingerprint: data.key_fingerprint,
     ticket: data.ticket,
     branch: text(data.branch, 256),
     repo: text(data.repo, 256),

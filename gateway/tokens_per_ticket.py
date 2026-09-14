@@ -12,8 +12,11 @@ own tag reports) works unchanged.
 Rules:
 - A request that already carries a ticket tag (for example from
   `ticket:start`, which sets x-litellm-tags) keeps it. Explicit beats automatic.
-- The session must have been reported with the same gateway key that makes
-  the call, so nobody can re-point a colleague's session at another ticket.
+- The session must have been reported by the same gateway key that makes the
+  call. Hooks never send the key: they send sha256(sha256(key)), and LiteLLM
+  already knows the key as sha256(key) (`user_api_key_dict.token`), so one
+  more round here gives the same fingerprint. Nobody can re-point a
+  colleague's session at another ticket.
 - It never blocks a model call: registry errors or slowness mean "no tag".
 
 Loaded with `litellm_settings.callbacks: tokens_per_ticket.proxy_handler_instance`
@@ -22,6 +25,7 @@ by LiteLLM's tag *budget* check, which runs earlier during auth; spend
 tracking is unaffected.
 """
 
+import hashlib
 import os
 import time
 
@@ -68,7 +72,8 @@ class SessionTicketTagger(CustomLogger):
         session = await self._lookup(session_id)
         if not session or not session.get("ticket"):
             return
-        if session.get("key_token") != getattr(user_api_key_dict, "token", None):
+        token = getattr(user_api_key_dict, "token", None)
+        if not token or session.get("key_fingerprint") != hashlib.sha256(token.encode()).hexdigest():
             return
 
         metadata["tags"] = tags + [f"{self.tag_prefix}{session['ticket']}"]
