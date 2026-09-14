@@ -2,6 +2,8 @@
   "name": "tokens-per-ticket",
   "version": "0.1.0",
   "private": true,
+  "description": "Attribute AI development spend to tickets: Claude Code + LiteLLM tags + a Next.js ledger.",
+  "license": "MIT",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
