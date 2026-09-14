@@ -1,69 +1,101 @@
-import Image from "next/image";
+import Link from "next/link";
+import { Empty, Figure, Figures, RangePicker, SpendBar } from "@/app/_components/ledger-ui";
+import { getTickets, parseRange } from "@/lib/data";
+import { formatDay, formatPercent, formatTokens, formatUsd } from "@/lib/format";
+import { addMetrics, cacheReadShare, emptyUsage } from "@/lib/ledger";
 
-export default function Home() {
+export default async function LedgerPage({ searchParams }: PageProps<"/">) {
+  const days = parseRange((await searchParams).days);
+  const { rows, range } = await getTickets(days);
+
+  const total = rows.reduce(
+    (sum, row) =>
+      addMetrics(sum, {
+        spend: row.spend,
+        prompt_tokens: row.promptTokens,
+        completion_tokens: row.completionTokens,
+        cache_read_input_tokens: row.cacheReadTokens,
+        cache_creation_input_tokens: row.cacheWriteTokens,
+        total_tokens: row.totalTokens,
+        api_requests: row.requests,
+        successful_requests: row.requests - row.failedRequests,
+        failed_requests: row.failedRequests,
+      }),
+    emptyUsage(),
+  );
+  const maxSpend = Math.max(0, ...rows.map((row) => row.spend));
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="flex flex-col gap-8">
+      <section className="flex flex-col gap-3">
+        <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+          What each ticket cost to build with AI
+        </h1>
+        <p className="max-w-2xl text-ink-soft">
+          Every model call made while working a ticket carries its tag through the LiteLLM gateway. This is the sum,
+          per ticket, for {formatDay(range.startDate)} to {formatDay(range.endDate)}.
+        </p>
+      </section>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-medium text-ink-soft">
+          {rows.length} {rows.length === 1 ? "ticket" : "tickets"}
+        </h2>
+        <RangePicker current={days} basePath="/" />
+      </div>
+
+      {rows.length === 0 ? (
+        <Empty title="No ticket spend in this range">
+          Start work with <code className="num">pnpm ticket:start ENG-123</code> so Claude Code tags its calls, or
+          run <code className="num">pnpm gateway:smoke</code> to send a few tagged test calls.
+        </Empty>
+      ) : (
+        <>
+          <Figures>
+            <Figure label="Spend" value={formatUsd(total.spend)} />
+            <Figure label="Tokens" value={formatTokens(total.totalTokens)} />
+            <Figure label="Cache reads" value={formatPercent(cacheReadShare(total))} note="of input tokens" />
+            <Figure label="Requests" value={total.requests.toLocaleString("en-US")} />
+          </Figures>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-rule text-left text-xs uppercase tracking-wider text-ink-soft">
+                  <th scope="col" className="py-2 pr-4 font-medium">Ticket</th>
+                  <th scope="col" className="w-40 py-2 pr-4 font-medium">Spend</th>
+                  <th scope="col" className="py-2 pr-4 text-right font-medium">Tokens</th>
+                  <th scope="col" className="py-2 pr-4 text-right font-medium">Cache reads</th>
+                  <th scope="col" className="py-2 pr-4 text-right font-medium">Days</th>
+                  <th scope="col" className="py-2 text-right font-medium">Last active</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.key} className="border-b border-rule hover:bg-sheet">
+                    <td className="py-3 pr-4">
+                      <Link href={`/tickets/${row.key}?days=${days}`} className="group flex flex-col">
+                        <span className="num font-medium group-hover:text-money">{row.key}</span>
+                        {row.title ? <span className="text-ink-soft">{row.title}</span> : null}
+                      </Link>
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="num">{formatUsd(row.spend)}</span>
+                        <SpendBar value={row.spend} max={maxSpend} label={`${formatUsd(row.spend)} of ${formatUsd(maxSpend)}`} />
+                      </div>
+                    </td>
+                    <td className="num py-3 pr-4 text-right">{formatTokens(row.totalTokens)}</td>
+                    <td className="num py-3 pr-4 text-right">{formatPercent(cacheReadShare(row))}</td>
+                    <td className="num py-3 pr-4 text-right">{row.activeDays}</td>
+                    <td className="num py-3 text-right text-ink-soft">{formatDay(row.lastDay)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </main>
   );
 }

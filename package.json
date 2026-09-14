@@ -7,15 +7,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test:unit": "node --import tsx --test tests/unit/*.test.ts",
     "ticket:start": "node --import tsx scripts/ticket-start.mts",
     "ticket:report": "node --env-file-if-exists=.env.local --import tsx scripts/ticket-report.mts",
     "gateway:up": "docker compose -f gateway/docker-compose.yml up -d",
     "gateway:down": "docker compose -f gateway/docker-compose.yml down",
-    "gateway:smoke": "node --env-file-if-exists=.env.local --import tsx scripts/gateway-smoke.mts"
+    "gateway:smoke": "node --env-file-if-exists=.env.local --import tsx scripts/gateway-smoke.mts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.48",
+    "ai": "^7.0.99",
     "next": "16.3.5",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -23,6 +26,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
