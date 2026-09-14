@@ -1,19 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { basicAuthOk } from "./lib/basic-auth";
 
 /**
  * Optional password gate. When LEDGER_BASIC_AUTH=user:password is set, every
  * page and server action asks for it. Required before deploying with
  * LEDGER_DATA=litellm, since the ledger shows organization-wide spend.
  *
+ * This is the first line only: data.ts and the review action check the same
+ * header again before they use the gateway key (src/lib/basic-auth.ts).
+ *
  * Basic auth is deliberately small. Put the app behind your SSO (for example
  * Vercel Deployment Protection) for anything beyond a team demo.
  */
 export function proxy(request: NextRequest) {
-  const expected = process.env.LEDGER_BASIC_AUTH;
-  if (!expected) return NextResponse.next();
-
-  const header = request.headers.get("authorization") ?? "";
-  if (header.startsWith("Basic ") && timingSafeEqual(decodeBase64(header.slice(6)), expected)) {
+  if (basicAuthOk(request.headers.get("authorization"), process.env.LEDGER_BASIC_AUTH)) {
     return NextResponse.next();
   }
 
@@ -21,21 +21,6 @@ export function proxy(request: NextRequest) {
     status: 401,
     headers: { "WWW-Authenticate": 'Basic realm="tokens-per-ticket", charset="UTF-8"' },
   });
-}
-
-/** atob throws on malformed input, which would turn a bad header into a 500 instead of a 401. */
-function decodeBase64(value: string): string {
-  try {
-    return atob(value.trim());
-  } catch {
-    return "";
-  }
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  return diff === 0;
 }
 
 export const config = {

@@ -1,7 +1,7 @@
 "use server";
 
 import { loadContract, normalizeTicketKey } from "@/lib/contract";
-import { getTicket, parseRange } from "@/lib/data";
+import { getTicket, isAuthorized, parseRange } from "@/lib/data";
 import { reviewModel, reviewSpend } from "@/lib/review";
 
 export type ReviewState = { status: "idle" } | { status: "done"; text: string } | { status: "error"; message: string };
@@ -11,6 +11,8 @@ export type ReviewState = { status: "idle" } | { status: "done"; text: string } 
  * browser, then asks the review model about them.
  */
 export async function reviewTicketSpend(_previous: ReviewState, form: FormData): Promise<ReviewState> {
+  // Server Actions are public POST endpoints; don't rely on src/proxy.ts alone.
+  if (!(await isAuthorized())) return { status: "error", message: "Authentication required." };
   if (!reviewModel()) return { status: "error", message: "Reviews are off. Set LEDGER_REVIEW_MODEL (and LEDGER_BASIC_AUTH in production) to turn them on." };
 
   const key = normalizeTicketKey(String(form.get("key") ?? ""), loadContract(process.cwd()));

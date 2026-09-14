@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { NextRequest } from "next/server";
 import { proxy } from "../../src/proxy.ts";
+import { basicAuthOk } from "../../src/lib/basic-auth.ts";
 import type { TicketDetail } from "../../src/lib/ledger.ts";
 import { reviewModel, reviewPrompt } from "../../src/lib/review.ts";
 
@@ -33,6 +34,21 @@ describe("proxy (LEDGER_BASIC_AUTH)", () => {
   it("answers a malformed header with 401, not a server error", () => {
     process.env.LEDGER_BASIC_AUTH = "lead:s3cret";
     assert.equal(proxy(request("Basic %%%not-base64")).status, 401);
+  });
+});
+
+describe("basicAuthOk (re-checked in data access and the review action)", () => {
+  it("passes when no password is configured", () => {
+    assert.equal(basicAuthOk(null, undefined), true);
+    assert.equal(basicAuthOk(null, ""), true);
+  });
+
+  it("requires the exact credentials when a password is configured", () => {
+    assert.equal(basicAuthOk(null, "lead:s3cret"), false);
+    assert.equal(basicAuthOk(`Basic ${btoa("lead:s3cret")}`, "lead:s3cret"), true);
+    assert.equal(basicAuthOk(`Basic ${btoa("lead:s3cre")}`, "lead:s3cret"), false);
+    assert.equal(basicAuthOk(`Bearer ${btoa("lead:s3cret")}`, "lead:s3cret"), false);
+    assert.equal(basicAuthOk("Basic %%%", "lead:s3cret"), false);
   });
 });
 
