@@ -39,10 +39,25 @@ export function renderReport(input: {
     }
   }
 
+  // The query only sees the window. Spend on its first day usually means the
+  // ticket started earlier, and --post would replace a fuller report with a
+  // smaller number that reads like the total.
+  if (startsAtWindowEdge(detail, range)) {
+    lines.push(
+      "",
+      `> ⚠ Spend was recorded on ${formatDay(range.startDate)}, the first day of this window, so earlier spend may be missing. Rerun with a larger \`--days\`.`,
+    );
+  }
+
   lines.push(
     "",
     `_LiteLLM tag \`${tag}\`, ${range.startDate} → ${range.endDate} (UTC). ${REPORT_SIGNATURE}, ${input.generatedAt.toISOString().slice(0, 16).replace("T", " ")} UTC._`,
   );
 
   return lines.join("\n");
+}
+
+/** True when the ticket already had spend on the first day of the queried window. */
+export function startsAtWindowEdge(detail: Pick<TicketDetail, "firstDay">, range: { startDate: string }): boolean {
+  return detail.firstDay <= range.startDate;
 }
