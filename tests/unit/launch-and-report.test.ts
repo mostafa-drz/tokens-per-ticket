@@ -91,6 +91,21 @@ describe("renderReport", () => {
     assert.ok(report.includes(REPORT_SIGNATURE));
     assert.match(report, /ticket:ENG-1/);
   });
+
+  it("says nothing about the window when the ticket started inside it", () => {
+    assert.doesNotMatch(report, /earlier spend may be missing/);
+  });
+
+  it("warns that the total may be partial when spend starts on the window's first day", () => {
+    const partial = renderReport({
+      detail: { ...detail, firstDay: "2026-08-16" },
+      tag: "ticket:ENG-1",
+      range: { startDate: "2026-08-16", endDate: "2026-09-14" },
+      generatedAt: new Date("2026-09-14T18:30:00Z"),
+    });
+    assert.match(partial, /first day of this window, so earlier spend may be missing/);
+    assert.match(partial, /--days/);
+  });
 });
 
 describe("postUnsupportedReason", () => {

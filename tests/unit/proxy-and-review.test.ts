@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { NextRequest } from "next/server";
 import { proxy } from "../../src/proxy.ts";
+import { basicAuthOk } from "../../src/lib/basic-auth.ts";
 import type { TicketDetail } from "../../src/lib/ledger.ts";
-import { reviewModel, reviewPrompt } from "../../src/lib/review.ts";
+import { reviewApiKey, reviewModel, reviewPrompt } from "../../src/lib/review.ts";
 
 describe("proxy (LEDGER_BASIC_AUTH)", () => {
   afterEach(() => {
@@ -36,6 +37,21 @@ describe("proxy (LEDGER_BASIC_AUTH)", () => {
   });
 });
 
+describe("basicAuthOk (re-checked in data access and the review action)", () => {
+  it("passes when no password is configured", () => {
+    assert.equal(basicAuthOk(null, undefined), true);
+    assert.equal(basicAuthOk(null, ""), true);
+  });
+
+  it("requires the exact credentials when a password is configured", () => {
+    assert.equal(basicAuthOk(null, "lead:s3cret"), false);
+    assert.equal(basicAuthOk(`Basic ${btoa("lead:s3cret")}`, "lead:s3cret"), true);
+    assert.equal(basicAuthOk(`Basic ${btoa("lead:s3cre")}`, "lead:s3cret"), false);
+    assert.equal(basicAuthOk(`Bearer ${btoa("lead:s3cret")}`, "lead:s3cret"), false);
+    assert.equal(basicAuthOk("Basic %%%", "lead:s3cret"), false);
+  });
+});
+
 describe("reviewModel", () => {
   it("is off without LEDGER_REVIEW_MODEL", () => {
     assert.equal(reviewModel({ NODE_ENV: "development" }), null);
@@ -48,6 +64,14 @@ describe("reviewModel", () => {
       "claude-haiku-4-5",
     );
     assert.equal(reviewModel({ NODE_ENV: "development", LEDGER_REVIEW_MODEL: " claude-haiku-4-5 " }), "claude-haiku-4-5");
+  });
+});
+
+describe("reviewApiKey", () => {
+  it("prefers the budgeted review key over the spend-reading key", () => {
+    assert.equal(reviewApiKey({ NODE_ENV: "production", LEDGER_REVIEW_API_KEY: "sk-review", LITELLM_API_KEY: "sk-reader" }), "sk-review");
+    assert.equal(reviewApiKey({ NODE_ENV: "development", LITELLM_API_KEY: "sk-reader" }), "sk-reader");
+    assert.equal(reviewApiKey({ NODE_ENV: "development", LEDGER_REVIEW_API_KEY: " " }), null);
   });
 });
 

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { loadContract } from "../../src/lib/contract.ts";
 import { cacheReadShare, summarizeTicket, summarizeTickets } from "../../src/lib/ledger.ts";
-import { fetchTagActivity, lastDays, LiteLLMError, mergeDays, type DailySpend } from "../../src/lib/litellm.ts";
+import { fetchTagActivity, lastDays, LiteLLMError, mergeDays, PAGE_SIZE, type DailySpend } from "../../src/lib/litellm.ts";
 
 const contract = loadContract();
 
@@ -84,6 +84,9 @@ describe("fetchTagActivity", () => {
 
     assert.equal(seen.length, 3);
     assert.match(seen[0], /tags=ticket%3ATPT-1/);
+    // Large pages: a busy org's month of rows must fit in MAX_PAGES requests.
+    assert.equal(new URL(seen[0]).searchParams.get("page_size"), String(PAGE_SIZE));
+    assert.ok(PAGE_SIZE >= 1000);
     assert.deepEqual(
       days.map((d) => [d.date, d.metrics.spend]),
       [

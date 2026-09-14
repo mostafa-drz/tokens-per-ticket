@@ -74,7 +74,16 @@ export class LiteLLMError extends Error {
   }
 }
 
-const PAGE_SIZE = 100;
+/**
+ * LiteLLM pages over raw LiteLLM_DailyTagSpend rows: one per (date, tag, key,
+ * model, provider, endpoint...), and the all-tags query also returns every
+ * User-Agent tag row. A 40-developer org writes on the order of 10,000 rows a
+ * month, so 100 rows a page ran out of pages on the default 30-day view.
+ * `page_size` has no upper bound in get_tag_daily_activity (v1.100.1,
+ * tag_management_endpoints.py), and fewer pages also shrink the window in
+ * which a newly inserted row shifts the offsets between two page requests.
+ */
+export const PAGE_SIZE = 1000;
 const MAX_PAGES = 50;
 
 /**

@@ -30,9 +30,10 @@ model_list:
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
-
-litellm_settings:
-  # Keep raw per-request logs for 30 days. The daily per-tag rollups the
-  # ledger reads are kept regardless.
+  # Keep raw per-request logs for 30 days. The cleanup job deletes
+  # LiteLLM_SpendLogs rows only; the daily per-tag rollups the ledger reads
+  # are kept. LiteLLM reads this from general_settings only (proxy_server.py
+  # and db/db_transaction_queue/spend_log_cleanup.py at v1.100.1); under
+  # litellm_settings it is silently ignored.
   # https://docs.litellm.ai/docs/proxy/spend_logs_deletion
   maximum_spend_logs_retention_period: "30d"

@@ -55,10 +55,22 @@ export function reviewModel(env: NodeJS.ProcessEnv = process.env): string | null
   return model;
 }
 
+/**
+ * The key review calls spend on. LEDGER_REVIEW_API_KEY should be an ordinary
+ * virtual key with a small max_budget and `models` limited to the review
+ * model, so a leaked or abused key is capped. LITELLM_API_KEY reads the whole
+ * organization's spend and, created as the README says, has no model access
+ * ("no-default-models"); it is only the fallback for local development.
+ * https://docs.litellm.ai/docs/proxy/virtual_keys
+ */
+export function reviewApiKey(env: NodeJS.ProcessEnv = process.env): string | null {
+  return env.LEDGER_REVIEW_API_KEY?.trim() || env.LITELLM_API_KEY?.trim() || null;
+}
+
 export async function reviewSpend(detail: TicketDetail & { title?: string }): Promise<string> {
   const model = reviewModel();
-  const apiKey = process.env.LITELLM_API_KEY;
-  if (!model || !apiKey) throw new Error("Set LEDGER_REVIEW_MODEL and LITELLM_API_KEY to enable reviews.");
+  const apiKey = reviewApiKey();
+  if (!model || !apiKey) throw new Error("Set LEDGER_REVIEW_MODEL and LEDGER_REVIEW_API_KEY to enable reviews.");
 
   const gateway = createOpenAICompatible({
     name: "litellm",

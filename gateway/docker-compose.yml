@@ -15,7 +15,10 @@ services:
     image: ghcr.io/berriai/litellm:v1.100.1
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     ports:
-      - "4000:4000"
+      # Loopback only. The trial master key is public (gateway/.env.example),
+      # so publishing on 0.0.0.0 would hand admin access to anyone on the
+      # network. A team gateway belongs behind TLS, per LiteLLM's deploy guide.
+      - "127.0.0.1:4000:4000"
     env_file:
       - .env
     environment:

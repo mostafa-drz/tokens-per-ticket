@@ -1,4 +1,6 @@
+import { headers } from "next/headers";
 import { connection } from "next/server";
+import { basicAuthOk } from "./basic-auth";
 import { loadContract, ticketTag, type TicketContract } from "./contract";
 import { summarizeTicket, summarizeTickets, type TicketDetail, type TicketRow } from "./ledger";
 import { fetchTagActivity, lastDays, type TagActivityQuery } from "./litellm";
@@ -19,6 +21,15 @@ export const RANGE_OPTIONS = [7, 30, 90] as const;
 export type RangeDays = (typeof RANGE_OPTIONS)[number];
 
 export class LedgerConfigError extends Error {}
+
+/**
+ * Re-checks LEDGER_BASIC_AUTH where the gateway key is used, instead of
+ * trusting that src/proxy.ts ran. Next.js treats Proxy as an optimistic check
+ * and Server Actions as public endpoints (see src/lib/basic-auth.ts).
+ */
+export async function isAuthorized(): Promise<boolean> {
+  return basicAuthOk((await headers()).get("authorization"), process.env.LEDGER_BASIC_AUTH);
+}
 
 export function dataSource(): DataSource {
   return process.env.LEDGER_DATA === "litellm" ? "litellm" : "sample";
@@ -44,6 +55,7 @@ async function activity(query: TagActivityQuery) {
       "LEDGER_DATA=litellm shows your organization's spend. Set LEDGER_BASIC_AUTH=user:password before deploying it.",
     );
   }
+  if (!(await isAuthorized())) throw new LedgerConfigError("Authentication required.");
   const apiKey = process.env.LITELLM_API_KEY;
   if (!apiKey) throw new LedgerConfigError("LEDGER_DATA=litellm needs LITELLM_API_KEY.");
 

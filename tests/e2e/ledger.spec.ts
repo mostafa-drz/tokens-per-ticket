@@ -26,6 +26,8 @@ test("the ticket page previews the Linear comment with the ticket's tag", async 
   const preview = page.locator("pre");
   await expect(preview).toContainText("AI development spend · TPT-23");
   await expect(preview).toContainText("ticket:TPT-23");
+  // TPT-23's sample spend starts well inside 30 days, so the report is whole.
+  await expect(preview).not.toContainText("earlier spend may be missing");
 });
 
 test("the range picker changes the window and marks the current choice", async ({ page }) => {
