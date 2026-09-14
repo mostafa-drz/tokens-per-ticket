@@ -12,10 +12,10 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test:unit": "node --import tsx --test tests/unit/*.test.ts",
     "ticket:start": "node --import tsx scripts/ticket-start.mts",
-    "ticket:report": "node --env-file-if-exists=.env.local --import tsx scripts/ticket-report.mts",
+    "ticket:report": "node --import tsx scripts/ticket-report.mts",
     "gateway:up": "docker compose -f gateway/docker-compose.yml up -d",
     "gateway:down": "docker compose -f gateway/docker-compose.yml down",
-    "gateway:smoke": "node --env-file-if-exists=.env.local --import tsx scripts/gateway-smoke.mts",
+    "gateway:smoke": "node --import tsx scripts/gateway-smoke.mts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

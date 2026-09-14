@@ -6,11 +6,13 @@
  * LiteLLM to write them, then reads them back the same way the app does.
  */
 import { loadContract, ticketTag } from "../src/lib/contract.ts";
+import { loadEnvLocal } from "../src/lib/env.ts";
 import { formatTokens, formatUsd } from "../src/lib/format.ts";
 import { summarizeTickets } from "../src/lib/ledger.ts";
 import { fetchTagActivity, lastDays } from "../src/lib/litellm.ts";
 
-const baseUrl = process.env.LITELLM_BASE_URL ?? "http://localhost:4000";
+loadEnvLocal([process.cwd()]);
+const baseUrl = process.env.LITELLM_BASE_URL || "http://localhost:4000";
 const apiKey = process.env.LITELLM_API_KEY;
 if (!apiKey) {
   console.error("✖ Set LITELLM_API_KEY in .env.local (see .env.example).");

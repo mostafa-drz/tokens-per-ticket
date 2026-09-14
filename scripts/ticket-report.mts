@@ -9,7 +9,8 @@
  */
 import { parseArgs } from "node:util";
 import { findTicketKey, loadContract, normalizeTicketKey, ticketTag } from "../src/lib/contract.ts";
-import { currentBranch, mainCheckoutRoot } from "../src/lib/git.ts";
+import { loadEnvLocal } from "../src/lib/env.ts";
+import { currentBranch, mainCheckoutRoot, tryGit } from "../src/lib/git.ts";
 import { summarizeTicket } from "../src/lib/ledger.ts";
 import { upsertReportComment } from "../src/lib/linear.ts";
 import { fetchTagActivity, lastDays } from "../src/lib/litellm.ts";
@@ -20,7 +21,7 @@ const USAGE = `Usage: pnpm ticket:report [TICKET-KEY] [--days <n>] [--post]
   --days <n>   Look back this many days, today included (default 30)
   --post       Create or update the report comment on the Linear ticket
 
-Environment (.env.local): LITELLM_BASE_URL, LITELLM_API_KEY, LINEAR_API_KEY (for --post)`;
+Environment (.env.local here or in the main checkout): LITELLM_BASE_URL, LITELLM_API_KEY, LINEAR_API_KEY (for --post)`;
 
 function fail(message: string): never {
   console.error(`\n✖ ${message}\n`);
@@ -41,7 +42,10 @@ if (values.help) {
   process.exit(0);
 }
 
-const contract = loadContract(mainCheckoutRoot());
+const mainRoot = mainCheckoutRoot();
+// Ticket worktrees have no .env.local of their own (it's gitignored).
+loadEnvLocal([tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd(), mainRoot]);
+const contract = loadContract(mainRoot);
 const branch = currentBranch();
 const key = positionals[0]
   ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key.`))
@@ -51,8 +55,8 @@ const key = positionals[0]
 const days = Number.parseInt(values.days, 10);
 if (!Number.isInteger(days) || days < 1) fail("--days must be a positive whole number.");
 
-const apiKey = process.env.LITELLM_API_KEY ?? fail("Set LITELLM_API_KEY in .env.local (see .env.example).");
-const baseUrl = process.env.LITELLM_BASE_URL ?? "http://localhost:4000";
+const apiKey = process.env.LITELLM_API_KEY || fail("Set LITELLM_API_KEY in .env.local (see .env.example).");
+const baseUrl = process.env.LITELLM_BASE_URL || "http://localhost:4000";
 
 const tag = ticketTag(key, contract);
 const range = lastDays(days);
@@ -73,7 +77,7 @@ try {
   console.log(`\n${report}\n`);
 
   if (values.post) {
-    const linearKey = process.env.LINEAR_API_KEY ?? fail("Set LINEAR_API_KEY in .env.local to use --post.");
+    const linearKey = process.env.LINEAR_API_KEY || fail("Set LINEAR_API_KEY in .env.local to use --post.");
     const { issue, action } = await upsertReportComment({ key, body: report }, { apiKey: linearKey });
     console.log(`✓ Report comment ${action} on ${issue.identifier}: ${issue.url}`);
   }
