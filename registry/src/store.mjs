@@ -41,6 +41,7 @@ export async function postgresStore(pool, { retentionDays = 90 } = {}) {
     );
     CREATE INDEX IF NOT EXISTS tpt_session_events_session ON tpt_session_events (session_id, created_at);
   `);
+  await migrate(pool);
   await pool.query(`DELETE FROM tpt_session_events WHERE created_at < now() - make_interval(days => $1)`, [retentionDays]);
   await pool.query(`DELETE FROM tpt_sessions WHERE updated_at < now() - make_interval(days => $1)`, [retentionDays]);
 
@@ -68,4 +69,32 @@ export async function postgresStore(pool, { retentionDays = 90 } = {}) {
       );
     },
   };
+}
+
+/**
+ * Brings tables created by earlier versions up to date. Idempotent: every
+ * step checks before it changes anything, so it runs on each start.
+ *
+ * v0.1 stored `key_token` (LiteLLM's sha256(key)). Sessions now store
+ * `key_fingerprint` = sha256(key_token), which can be backfilled in SQL, so
+ * existing sessions keep attributing after an upgrade.
+ */
+export async function migrate(pool) {
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'tpt_sessions' AND column_name = 'key_token') THEN
+        ALTER TABLE tpt_sessions ADD COLUMN IF NOT EXISTS key_fingerprint text;
+        UPDATE tpt_sessions
+           SET key_fingerprint = encode(sha256(convert_to(key_token, 'UTF8')), 'hex')
+         WHERE key_fingerprint IS NULL AND key_token IS NOT NULL;
+        DELETE FROM tpt_sessions WHERE key_fingerprint IS NULL;
+        ALTER TABLE tpt_sessions ALTER COLUMN key_fingerprint SET NOT NULL;
+        ALTER TABLE tpt_sessions DROP COLUMN key_token;
+      END IF;
+      ALTER TABLE tpt_sessions DROP COLUMN IF EXISTS key_alias;
+      ALTER TABLE tpt_session_events DROP COLUMN IF EXISTS key_alias;
+    END $$;
+  `);
 }
