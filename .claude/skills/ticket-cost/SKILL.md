@@ -2,12 +2,13 @@
 name: ticket-cost
 description: Report what a ticket has cost in AI tokens so far, from the LiteLLM gateway, and point out anything worth discussing (model mix, prompt cache use, failed calls). Use when the user asks what this ticket or ENG-123 has cost, how many tokens were used, or wants the spend posted to Linear.
 argument-hint: "[TICKET-KEY] [--days N] [--post]"
-allowed-tools: Bash(pnpm -s ticket:report:*)
+allowed-tools:
+  - "Bash(node --import tsx scripts/ticket-report.mts *)"
 ---
 
 # Ticket cost
 
-1. Run `pnpm -s ticket:report $ARGUMENTS`.
+1. Run `node --import tsx scripts/ticket-report.mts $ARGUMENTS` (the `ticket:report` script, run directly so it works under any package manager).
    - With no key, the script reads it from the current branch.
    - Only add `--post` when the user explicitly asked to post or update the Linear comment. Posting is visible to the whole team.
 2. If it fails, relay the error message as is. The script's messages already say how to fix the problem (gateway not running, missing key, branch outside the contract).
