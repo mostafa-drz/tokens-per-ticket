@@ -212,7 +212,7 @@ worktree:
 
 Branches are parsed **by the template**, not by searching for something that looks like a key. A loose search reads `dependabot/npm_and_yarn/next-16` as ticket `NEXT-16`. With the template, branches outside the contract (`main`, spikes, bots) are simply unattributed. That's the honest answer.
 
-Using Jira with `feature/PROJ-42_login`? Set `template: "feature/{key}_{slug}"`. Nothing else changes.
+`{key}` writes the key lowercased, as Linear does. `{KEY}` keeps it as the tracker prints it. Using Jira with `feature/PROJ-42_login`? Set `template: "feature/{KEY}_{slug}"`: Jira only [links branches whose key is uppercase](https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/), and on a case-insensitive file system (macOS) a lowercased `feature/proj-42_login` collides with an existing `feature/PROJ-42_login`. Parsing is case-insensitive either way, so hand-typed branches still count. `ticket:report --post` only writes to Linear; see [the ticket report](#5-see-what-it-cost).
 
 ---
 

@@ -101,6 +101,34 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
     assert.equal(branchName({ user: "mostafa", key: "PROJ-43", slug: "Login page" }, jira), "feature/proj-43_login-page");
   });
 
+  it("keeps the key as printed with {KEY}, for trackers such as Jira", () => {
+    const jira = parseContract(`
+key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
+branch: { template: "feature/{KEY}_{slug}" }
+tag: { prefix: "ticket:" }
+worktree: { path: "../{repo}.worktrees/{branch}" }
+`);
+    const branch = branchName({ user: "mostafa", key: "PROJ-42", slug: "Short title" }, jira);
+    assert.equal(branch, "feature/PROJ-42_short-title");
+    assert.equal(findTicketKey(branch, jira), "PROJ-42");
+    assert.equal(findTicketKey("feature/proj-42_typed-by-hand", jira), "PROJ-42");
+    assert.equal(
+      worktreePath({ repoRoot: "/work/app", branch }, jira),
+      "/work/app.worktrees/feature__PROJ-42_short-title",
+    );
+  });
+
+  it("rejects a template without a key placeholder", () => {
+    assert.throws(() =>
+      parseContract(`
+key: { pattern: "[A-Z]+-[0-9]+" }
+branch: { template: "feature/{slug}" }
+tag: { prefix: "ticket:" }
+worktree: { path: "../{repo}.worktrees/{branch}" }
+`),
+    );
+  });
+
   it("places worktrees next to the repo, one folder per branch", () => {
     assert.equal(
       worktreePath({ repoRoot: "/work/tokens-per-ticket", branch: "mostafa/eng-9" }, contract),

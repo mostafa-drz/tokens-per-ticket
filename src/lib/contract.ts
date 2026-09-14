@@ -17,7 +17,14 @@ const ContractSchema = z.object({
     teams: z.array(z.string()).default([]),
   }),
   branch: z.object({
-    template: z.string().includes("{key}"),
+    // {key} writes the key lowercased (Linear's default), {KEY} as the tracker
+    // prints it. Jira only links branches whose key is uppercase:
+    // https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/
+    template: z
+      .string()
+      .refine((template) => template.includes("{key}") || template.includes("{KEY}"), {
+        message: "branch.template must contain {key} or {KEY}",
+      }),
   }),
   tag: z.object({
     prefix: z.string().min(1),
@@ -52,8 +59,8 @@ export function normalizeTicketKey(input: string, contract: TicketContract): str
  *
  * Matching is strict on purpose: searching for "anything that looks like a
  * key" misreads branches such as `dependabot/npm_and_yarn/next-16` as ticket
- * NEXT-16. Branch names lowercase the key, so the key part is matched
- * case-insensitively. The slug is optional. Returns null for branches outside
+ * NEXT-16. Templates may lowercase the key ({key}) or keep it ({KEY}), and
+ * people type branches by hand, so the key part is matched case-insensitively. The slug is optional. Returns null for branches outside
  * the contract (main, spikes, bots).
  */
 export function findTicketKey(branch: string, contract: TicketContract): string | null {
@@ -66,10 +73,10 @@ const SLUG_WITH_SEPARATOR = /[-_./]?\{slug\}/g;
 
 function branchPattern(contract: TicketContract): RegExp {
   const source = contract.branch.template
-    .split(/(\{user\}|\{key\}|[-_./]?\{slug\})/)
+    .split(/(\{user\}|\{key\}|\{KEY\}|[-_./]?\{slug\})/)
     .map((part) => {
       if (part === "{user}") return "[^/]+";
-      if (part === "{key}") return `(${contract.key.pattern})`;
+      if (part === "{key}" || part === "{KEY}") return `(${contract.key.pattern})`;
       if (part.endsWith("{slug}")) return `(?:${escapeRegExp(part.slice(0, -"{slug}".length))}.+)?`;
       return escapeRegExp(part);
     })
@@ -114,6 +121,7 @@ export function branchName(
       .replace(SLUG_WITH_SEPARATOR, (part) => (slug ? part.replace("{slug}", slug) : ""))
       .replaceAll("{user}", slugify(input.user))
       .replaceAll("{key}", input.key.toLowerCase())
+      .replaceAll("{KEY}", input.key)
   );
 }
 
