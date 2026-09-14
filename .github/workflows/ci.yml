@@ -19,6 +19,10 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:unit
+      - run: npm ci --prefix registry
+      - run: pnpm test:registry
+      - name: The committed CLI bundle matches the source
+        run: pnpm build:cli && git diff --exit-code .tokens-per-ticket/
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
         env:
