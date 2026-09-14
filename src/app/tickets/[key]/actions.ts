@@ -11,7 +11,7 @@ export type ReviewState = { status: "idle" } | { status: "done"; text: string } 
  * browser, then asks the review model about them.
  */
 export async function reviewTicketSpend(_previous: ReviewState, form: FormData): Promise<ReviewState> {
-  if (!reviewModel()) return { status: "error", message: "Reviews are off. Set LEDGER_REVIEW_MODEL to turn them on." };
+  if (!reviewModel()) return { status: "error", message: "Reviews are off. Set LEDGER_REVIEW_MODEL (and LEDGER_BASIC_AUTH in production) to turn them on." };
 
   const key = normalizeTicketKey(String(form.get("key") ?? ""), loadContract(process.cwd()));
   if (!key) return { status: "error", message: "That isn't a ticket key." };

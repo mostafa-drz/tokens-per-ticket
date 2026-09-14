@@ -3,7 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import { NextRequest } from "next/server";
 import { proxy } from "../../src/proxy.ts";
 import type { TicketDetail } from "../../src/lib/ledger.ts";
-import { reviewPrompt } from "../../src/lib/review.ts";
+import { reviewModel, reviewPrompt } from "../../src/lib/review.ts";
 
 describe("proxy (LEDGER_BASIC_AUTH)", () => {
   afterEach(() => {
@@ -28,6 +28,26 @@ describe("proxy (LEDGER_BASIC_AUTH)", () => {
     process.env.LEDGER_BASIC_AUTH = "lead:s3cret";
     assert.notEqual(proxy(request(`Basic ${btoa("lead:s3cret")}`)).status, 401);
     assert.equal(proxy(request(`Basic ${btoa("lead:guess")}`)).status, 401);
+  });
+
+  it("answers a malformed header with 401, not a server error", () => {
+    process.env.LEDGER_BASIC_AUTH = "lead:s3cret";
+    assert.equal(proxy(request("Basic %%%not-base64")).status, 401);
+  });
+});
+
+describe("reviewModel", () => {
+  it("is off without LEDGER_REVIEW_MODEL", () => {
+    assert.equal(reviewModel({ NODE_ENV: "development" }), null);
+  });
+
+  it("stays off in production without LEDGER_BASIC_AUTH, so a public deploy can't spend tokens", () => {
+    assert.equal(reviewModel({ NODE_ENV: "production", LEDGER_REVIEW_MODEL: "claude-haiku-4-5" }), null);
+    assert.equal(
+      reviewModel({ NODE_ENV: "production", LEDGER_REVIEW_MODEL: "claude-haiku-4-5", LEDGER_BASIC_AUTH: "lead:pw" }),
+      "claude-haiku-4-5",
+    );
+    assert.equal(reviewModel({ NODE_ENV: "development", LEDGER_REVIEW_MODEL: " claude-haiku-4-5 " }), "claude-haiku-4-5");
   });
 });
 
