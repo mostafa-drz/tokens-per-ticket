@@ -102,7 +102,13 @@ The smoke test uses `mock-ticket-model`, defined in `gateway/litellm.config.yaml
 
 Locally, `pnpm gateway:up` is enough. For a team, deploy LiteLLM with Postgres somewhere developers and the ledger can both reach it, following [LiteLLM's deploy guide](https://docs.litellm.ai/docs/proxy/deploy). Put your `ANTHROPIC_API_KEY` in the gateway's environment, and set `LITELLM_MASTER_KEY` and `LITELLM_SALT_KEY`. The salt key can't be rotated once models are stored, so choose it once.
 
-If you already run LiteLLM for your product, you can point development traffic at the same gateway. You don't need a config change: tags come from request headers.
+If you already run LiteLLM for your product, you can point development traffic at the same gateway. Tags come from request headers, so nothing ticket-specific goes in its config, but check three things first:
+
+- **It stores spend in Postgres.** `/tag/daily/activity` reads the `LiteLLM_DailyTagSpend` table; a gateway without `DATABASE_URL` has nothing to report.
+- **It serves the model names Claude Code asks for**, on the Anthropic Messages format (`/v1/messages`). A product config that only lists your product's models will reject them. The `claude-*` wildcard in `gateway/litellm.config.yaml` is the smallest way to add them ([Claude Code gateway compatibility](https://code.claude.com/docs/en/llm-gateway-protocol)).
+- **Its version has `/tag/daily/activity`.** This repo was verified against `v1.100.1`. If yours is older, call the route with an admin key before rolling anything out.
+
+Budgets and alerts you set for the product also see this traffic, and the ledger's key can read the product's spend too.
 
 ### 2. Give each developer a key
 
@@ -115,7 +121,16 @@ curl -X POST "$LITELLM_BASE_URL/key/generate" \
   -d '{"key_alias": "mostafa", "max_budget": 200, "budget_duration": "30d"}'
 ```
 
-These keys can call models, but they can't read spend routes. That's why the ledger and `ticket:report` use an admin key.
+These keys can call models, but they can't read spend routes (`/tag/daily/activity` answers 401). The ledger and `ticket:report` need a key that can. Don't hand out the master key for that: create a user with LiteLLM's read-only `proxy_admin_viewer` role, which can view all spend but can't create keys or users ([access control](https://docs.litellm.ai/docs/proxy/access_control)). `/user/new` returns its key:
+
+```bash
+curl -X POST "$LITELLM_BASE_URL/user/new" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "ledger-reader", "user_role": "proxy_admin_viewer"}'
+```
+
+Checked on `v1.100.1`: that key reads `/tag/daily/activity` and gets 403 on `/key/generate`. It can still call models and it sees the whole organization's spend, so treat it as a secret: put it in Vercel's server-side environment, and give it only to the people who run `ticket:report`.
 
 ### 3. Connect Claude Code to the gateway
 
@@ -132,7 +147,27 @@ Each developer adds this to `~/.claude/settings.json` ([Claude Code LLM gateway 
 
 While a gateway credential is active, Claude Code bills per token to whoever owns the provider key behind the gateway, not to the developer's claude.ai subscription. If your team keeps subscriptions, LiteLLM documents a [Max subscription setup](https://docs.litellm.ai/docs/tutorials/claude_code_max_subscription): tokens are still counted per ticket, but they aren't billed per token.
 
-### 4. Start a ticket
+### 4. Put the launcher in the repos you work in
+
+`ticket:start`, `ticket:report`, the hook, and the skills act on **the git repository they live in**. Run from a clone of this repo, `ticket:start` makes a worktree of this repo, not of your product. So copy them into each product repository (the ledger app stays here and deploys on its own):
+
+| Copy | Why |
+|---|---|
+| `ticket-contract.yaml` | branch and tag rules |
+| `scripts/ticket-start.mts`, `scripts/ticket-report.mts` | the two commands |
+| `src/lib/{contract,env,format,git,launch,ledger,linear,litellm,report}.ts` | what the scripts import; none of them import Next.js |
+| `.claude/hooks/ticket-guard.mjs`, `.claude/skills/ticket-start`, `.claude/skills/ticket-cost`, and the `hooks` block of `.claude/settings.json` | the Claude Code integration |
+
+Then add the dev dependencies `tsx`, `yaml`, and `zod`, and the two scripts to `package.json`:
+
+```json
+"ticket:start": "node --import tsx scripts/ticket-start.mts",
+"ticket:report": "node --import tsx scripts/ticket-report.mts"
+```
+
+If `src/lib` is taken in that repo, put the files elsewhere and update the imports in the scripts and the `src/lib/contract.ts` path in the hook. Each developer puts `LITELLM_BASE_URL` and `LITELLM_API_KEY` in that repo's `.env.local` (see `.env.example`), and `LINEAR_API_KEY` if they post reports. The scripts also read the main checkout's `.env.local` when run inside a ticket worktree, which never has its own.
+
+### 5. Start a ticket
 
 ```bash
 pnpm ticket:start ENG-123 "retry checkout on 429"
@@ -140,13 +175,13 @@ pnpm ticket:start ENG-123 "retry checkout on 429"
 
 This:
 
-1. names a branch from the contract: `mostafa/eng-123-retry-checkout-on-429`
-2. creates it in its own worktree, `../tokens-per-ticket.worktrees/mostafa__eng-123-…`, so your current checkout is never switched and uncommitted work is never touched
+1. names a branch from the contract: `{user}/eng-123-retry-checkout-on-429`, where `{user}` is your `git config user.name` slugged (set `TICKET_USER` to override)
+2. creates it in its own worktree, `../<repo>.worktrees/<user>__eng-123-…`, so your current checkout is never switched and uncommitted work is never touched
 3. launches `claude` there with `x-litellm-tags: ticket:ENG-123`, and names the session `ENG-123`
 
 Running it again for the same ticket reuses the worktree. Use `--print` to get the command without launching, and `--base origin/main` to choose where a new branch starts.
 
-### 5. See what it cost
+### 6. See what it cost
 
 ```bash
 pnpm ticket:report                  # the ticket of the current branch, last 30 days
@@ -193,18 +228,18 @@ It has one AI feature, **Review spend**. A model reads a ticket's numbers and po
 |---|---|
 | `LEDGER_DATA` | `sample` (default) or `litellm` |
 | `LITELLM_BASE_URL` | Gateway URL |
-| `LITELLM_API_KEY` | An **admin** key (spend routes). Server-side only; never prefix it with `NEXT_PUBLIC_`. |
-| `LEDGER_REVIEW_MODEL` | Model for Review spend, e.g. `claude-haiku-4-5`. Empty hides the feature. |
+| `LITELLM_API_KEY` | A key that can read spend routes: the master key locally, a [`proxy_admin_viewer` key](#2-give-each-developer-a-key) in production. Server-side only; never prefix it with `NEXT_PUBLIC_`. |
+| `LEDGER_REVIEW_MODEL` | Model for Review spend, e.g. `claude-haiku-4-5`. Empty turns the feature off. In production it also needs `LEDGER_BASIC_AUTH`, because each click spends tokens on `LITELLM_API_KEY`. |
 | `LEDGER_BASIC_AUTH` | `user:password`. Required in production when `LEDGER_DATA=litellm`. |
 | `LINEAR_API_KEY` | Only for `pnpm ticket:report --post` |
 
 ### Deploying
 
-Import the repository into Vercel. Nothing else is needed for a public demo: sample data is the default, and it's labelled as sample data on every page.
+Import the repository into Vercel. Nothing else is needed for a public demo: sample data is the default, and it's labelled as sample data on every page. Leave `LEDGER_REVIEW_MODEL` unset on a public demo; the app keeps the review off in production without `LEDGER_BASIC_AUTH`.
 
 To deploy against a real gateway:
 
-1. Set `LEDGER_DATA=litellm`, `LITELLM_BASE_URL`, and `LITELLM_API_KEY`.
+1. Set `LEDGER_DATA=litellm`, `LITELLM_BASE_URL`, and `LITELLM_API_KEY`. The ledger's functions call the gateway from Vercel, so `LITELLM_BASE_URL` must be reachable from there, not only from your office network or VPN.
 2. Set `LEDGER_BASIC_AUTH`. The app refuses to show live data in production without it, because the ledger shows the whole organization's spend.
 3. For more than a team demo, put it behind [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection) or your SSO as well.
 

@@ -40,8 +40,19 @@ export function reviewPrompt(detail: TicketDetail & { title?: string }): string 
   ].join("\n");
 }
 
-export function reviewModel(): string | null {
-  return process.env.LEDGER_REVIEW_MODEL?.trim() || null;
+/**
+ * The model for reviews, or null when reviews are off.
+ *
+ * In production the feature also needs LEDGER_BASIC_AUTH. The review button is
+ * a server action that spends tokens on the gateway's admin key, and sample
+ * data (the default "public demo" deploy) has no other gate, so without a
+ * password anyone who finds the URL could run model calls on your bill.
+ */
+export function reviewModel(env: NodeJS.ProcessEnv = process.env): string | null {
+  const model = env.LEDGER_REVIEW_MODEL?.trim();
+  if (!model) return null;
+  if (env.NODE_ENV === "production" && !env.LEDGER_BASIC_AUTH) return null;
+  return model;
 }
 
 export async function reviewSpend(detail: TicketDetail & { title?: string }): Promise<string> {

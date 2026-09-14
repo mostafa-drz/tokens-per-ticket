@@ -34,6 +34,7 @@ export function ReviewPanel({ ticketKey, days, enabled }: { ticketKey: string; d
       {!enabled ? (
         <p className="text-sm text-ink-soft">
           Off in this deployment. Set <code className="num">LEDGER_REVIEW_MODEL</code> to a model your gateway serves.
+          In production it also needs <code className="num">LEDGER_BASIC_AUTH</code>, since each review spends tokens.
         </p>
       ) : null}
 

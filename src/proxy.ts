@@ -13,7 +13,7 @@ export function proxy(request: NextRequest) {
   if (!expected) return NextResponse.next();
 
   const header = request.headers.get("authorization") ?? "";
-  if (header.startsWith("Basic ") && timingSafeEqual(atob(header.slice(6)), expected)) {
+  if (header.startsWith("Basic ") && timingSafeEqual(decodeBase64(header.slice(6)), expected)) {
     return NextResponse.next();
   }
 
@@ -21,6 +21,15 @@ export function proxy(request: NextRequest) {
     status: 401,
     headers: { "WWW-Authenticate": 'Basic realm="tokens-per-ticket", charset="UTF-8"' },
   });
+}
+
+/** atob throws on malformed input, which would turn a bad header into a 500 instead of a 401. */
+function decodeBase64(value: string): string {
+  try {
+    return atob(value.trim());
+  } catch {
+    return "";
+  }
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
