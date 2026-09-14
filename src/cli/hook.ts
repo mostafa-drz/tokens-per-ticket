@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CONTRACT_FILE, findTicketKey, keyFromTag, loadContract, type TicketContract } from "../lib/contract.ts";
-import { reportSession, type SessionReport } from "../lib/registry-client.ts";
-import { ensureCommitTrailerHook } from "./git-trailer.ts";
+import { keyFingerprint, reportSession, trustedRegistryUrl, type SessionReport } from "../lib/registry-client.ts";
+import { ensureCommitTrailerHook, refreshTrustedCli } from "./git-trailer.ts";
 import { BUNDLE_PATH } from "./hint.ts";
 
 /**
@@ -84,7 +84,12 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const explicit = explicitTicket(env.ANTHROPIC_CUSTOM_HEADERS, contract);
 
   const startEvent = event === "SessionStart" || event === "CwdChanged";
-  if (startEvent) ensureCommitTrailerHook(root, contract);
+  if (startEvent) {
+    // Claude Code runs this repo's hooks only in folders the user trusted, so
+    // this is the one place allowed to refresh the copy the git hook runs.
+    refreshTrustedCli(root);
+    ensureCommitTrailerHook(root, contract);
+  }
 
   const title = event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
 
@@ -92,9 +97,19 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const problems: string[] = [];
   if (!env.ANTHROPIC_BASE_URL) problems.push("Claude Code isn't pointed at the LiteLLM gateway (ANTHROPIC_BASE_URL is not set), so no spend from this session reaches it.");
 
-  const registryUrl = env.TPT_REGISTRY_URL || contract.automation.registry_url;
+  const registry = trustedRegistryUrl({
+    envUrl: env.TPT_REGISTRY_URL,
+    repoUrl: contract.automation.registry_url,
+    gatewayUrl: env.ANTHROPIC_BASE_URL,
+  });
+  const registryUrl = registry.url;
   const gatewayKey = env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY;
   const automatic = contract.automation.sessions && registryUrl;
+  if (contract.automation.sessions && registry.ignored && env.ANTHROPIC_BASE_URL) {
+    problems.push(
+      `automation.registry_url (${registry.ignored}) isn't on the gateway's host, so it's ignored. Set TPT_REGISTRY_URL in your Claude Code settings to use it.`,
+    );
+  }
 
   let reported: "sent" | "skipped" | "failed" = "skipped";
   let failure = "";
@@ -108,13 +123,14 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
       if (event !== "UserPromptSubmit" || changed || due) {
         const payload: SessionReport = {
           session_id: input.session_id,
+          key_fingerprint: keyFingerprint(gatewayKey),
           ticket,
           branch,
           repo: repoName(root),
           head: git(["rev-parse", "HEAD"], cwd) || null,
           event,
         };
-        const result = await report(payload, { registryUrl, gatewayKey });
+        const result = await report(payload, { registryUrl });
         reported = result.ok ? "sent" : "failed";
         if (!result.ok) failure = result.reason;
         const alreadyWarned = state?.failed && state.reason === failure;

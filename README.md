@@ -109,7 +109,7 @@ Locally, `pnpm gateway:up` runs all three. For a team, deploy LiteLLM with Postg
 
 Automatic attribution needs two more things next to LiteLLM:
 
-- **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it the same Postgres (`DATABASE_URL`; it creates its own `tpt_*` tables), LiteLLM's URL (`LITELLM_URL`), and a shared secret `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS; the gateway plugin calls it on the internal network.
+- **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it the same Postgres (`DATABASE_URL`; it creates its own `tpt_*` tables) and a shared secret `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS, ideally on the gateway's host; the gateway plugin calls it on the internal network.
 - **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout, and never blocks a call.
 
 If you already run LiteLLM for your product, you can point development traffic at the same gateway, but check three things first:
@@ -176,7 +176,9 @@ Each developer adds this to `~/.claude/settings.json` ([Claude Code LLM gateway 
 
 While a gateway credential is active, Claude Code bills per token to whoever owns the provider key behind the gateway, not to the developer's claude.ai subscription. If your team keeps subscriptions, LiteLLM documents a [Max subscription setup](https://docs.litellm.ai/docs/tutorials/claude_code_max_subscription): tokens are still counted per ticket, but they aren't billed per token.
 
-That's the only per-person step, and it isn't even that with [managed settings](https://code.claude.com/docs/en/managed-settings): an admin can deliver `ANTHROPIC_BASE_URL` to every machine, leaving each engineer only their key. The hook needs the key in `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`; with an `apiKeyHelper`, it can't report sessions.
+If the registry isn't on the gateway's host, also set `"TPT_REGISTRY_URL": "https://…"` here: a registry URL from the repository is only trusted on the gateway's host (see [decisions](#decisions-limits-and-gotchas)).
+
+That's the only per-person step, and it isn't even that with [managed settings](https://code.claude.com/docs/en/managed-settings): an admin can deliver `ANTHROPIC_BASE_URL` and `TPT_REGISTRY_URL` to every machine, leaving each engineer only their key. The hook needs the key in `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` to compute its fingerprint; with an `apiKeyHelper`, it can't report sessions.
 
 ### 4. Set up each repository, once
 
@@ -308,7 +310,9 @@ Everything lives in the repo and is committed, so the whole team gets it:
 ## Decisions, limits, and gotchas
 
 - **Why a registry.** Claude Code has no way to change API request headers during a session. The only header helpers are for OpenTelemetry and plugin downloads ([settings](https://code.claude.com/docs/en/settings)). A session-to-ticket map read by the gateway is the smallest thing that follows branch switches.
-- **Who can move whose spend.** Hooks report with the engineer's own gateway key, which the registry checks against LiteLLM's `/key/info`. A session belongs to the first key that reports it. The plugin only tags a call when the calling key owns the session. Only the gateway, with `TPT_REGISTRY_TOKEN`, can read sessions.
+- **No key leaves the laptop through the hook.** Hooks send `sha256(sha256(key))`, not the key. LiteLLM stores a key as `sha256(key)` and rejects that hash as a credential; the extra round gives a fingerprint the plugin can recompute from the calling key's stored hash, and that works nowhere as a credential. A session belongs to the first fingerprint that reports it, and the plugin only tags calls from the matching key, so a report can only ever attribute the reporter's own calls. Only the gateway, with `TPT_REGISTRY_TOKEN`, can read sessions.
+- **The registry URL comes from trusted config.** `TPT_REGISTRY_URL` belongs in the user's or the organization's Claude Code settings. The repo's `automation.registry_url` is a default a branch could change, so it's used only when it's on the same host as the user's own `ANTHROPIC_BASE_URL`, and ignored with a warning otherwise.
+- **What runs on commit.** The `prepare-commit-msg` hook runs a copy of the CLI kept in the git directory (`.git/tokens-per-ticket/tpt.mjs`), never the checkout's file, so checking out a branch can't change the code that runs when you commit. `tpt init` writes that copy, and so does the Claude Code session hook, which Claude Code runs only in folders you've trusted. Hooks in `.claude/settings.json` follow [Claude Code's own trust model](https://code.claude.com/docs/en/permissions): a repository's committed settings decide what they run, as with any project hook, so review changes to `.claude/` and `.tokens-per-ticket/` like any other code.
 - **When tags can be wrong for a moment.**
   - The plugin caches a session for 2 seconds.
   - A `FileChanged` event can arrive a moment after the call that followed the switch.

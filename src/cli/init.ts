@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { CONTRACT_FILE, loadContract } from "../lib/contract.ts";
 import { tryGit } from "../lib/git.ts";
-import { ensureCommitTrailerHook } from "./git-trailer.ts";
+import { ensureCommitTrailerHook, refreshTrustedCli } from "./git-trailer.ts";
 import { BUNDLE_PATH } from "./hint.ts";
 import { hookSettings } from "./hook.ts";
 
@@ -94,7 +94,8 @@ export async function runInit(argv: string[]): Promise<void> {
     done.push(`added the /${name} skill`);
   }
 
-  // 5. Commit trailer hook
+  // 5. Commit trailer hook, running a copy of the CLI kept in the git directory
+  refreshTrustedCli(root);
   const hook = ensureCommitTrailerHook(root, contract);
   if (hook === "installed" || hook === "present") done.push(`commit trailer "${contract.automation.commit_trailer}: <KEY>" is on`);
   if (hook === "foreign") {

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
-import { HOOK_SCRIPT, ensureCommitTrailerHook, runGitTrailer } from "../../src/cli/git-trailer.ts";
+import { HOOK_SCRIPT, ensureCommitTrailerHook, refreshTrustedCli, runGitTrailer, trustedCliPath } from "../../src/cli/git-trailer.ts";
 import { handleHook } from "../../src/cli/hook.ts";
 import { mergeHookSettings } from "../../src/cli/init.ts";
 import { loadContract } from "../../src/lib/contract.ts";
-import type { SessionReport } from "../../src/lib/registry-client.ts";
+import { keyFingerprint, trustedRegistryUrl, type SessionReport } from "../../src/lib/registry-client.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const dir = mkdtempSync(path.join(os.tmpdir(), "tpt-hook-"));
@@ -50,6 +50,9 @@ describe("session hook", () => {
       reports.map((r) => [r.session_id, r.ticket, r.branch, r.event]),
       [["s1", "ENG-123", "jane/eng-123-retry", "SessionStart"]],
     );
+    // The key itself never goes to the registry, only its fingerprint.
+    assert.equal(reports[0].key_fingerprint, keyFingerprint("sk-jane"));
+    assert.ok(!JSON.stringify(reports[0]).includes("sk-jane"));
     assert.equal(output.hookSpecificOutput?.sessionTitle, "ENG-123");
     assert.match(output.hookSpecificOutput?.additionalContext ?? "", /count toward ticket ENG-123, following the current branch/);
     assert.equal(realpath(output.hookSpecificOutput?.watchPaths?.[0]), realpath(path.join(root, ".git", "HEAD")));
@@ -99,7 +102,7 @@ describe("session hook", () => {
     const { reports, deps } = recorder();
     const noGateway = await handleHook({ hook_event_name: "SessionStart", session_id: "s6", cwd: root }, {}, deps);
     assert.match(noGateway.systemMessage ?? "", /ANTHROPIC_BASE_URL is not set/);
-    const noKey = await handleHook({ hook_event_name: "SessionStart", session_id: "s7", cwd: root }, { ANTHROPIC_BASE_URL: "http://gw" }, deps);
+    const noKey = await handleHook({ hook_event_name: "SessionStart", session_id: "s7", cwd: root }, { ANTHROPIC_BASE_URL: "http://localhost:4000" }, deps);
     assert.match(noKey.systemMessage ?? "", /No gateway key/);
     assert.equal(reports.length, 0);
   });
@@ -124,6 +127,39 @@ describe("session hook", () => {
   });
 });
 
+describe("registry URL trust", () => {
+  it("prefers TPT_REGISTRY_URL from the user's or org's settings", () => {
+    assert.deepEqual(trustedRegistryUrl({ envUrl: "https://tpt.corp.dev", repoUrl: "https://evil.example", gatewayUrl: "https://gw.corp.dev" }), {
+      url: "https://tpt.corp.dev",
+    });
+  });
+
+  it("uses the repo's registry_url only on the gateway's host", () => {
+    assert.equal(trustedRegistryUrl({ repoUrl: "http://localhost:4100", gatewayUrl: "http://localhost:4000" }).url, "http://localhost:4100");
+    assert.deepEqual(trustedRegistryUrl({ repoUrl: "https://evil.example/collect", gatewayUrl: "https://gw.corp.dev" }), {
+      url: null,
+      ignored: "https://evil.example/collect",
+    });
+    assert.equal(trustedRegistryUrl({ repoUrl: "http://localhost:4100" }).url, null);
+  });
+
+  it("doesn't report to a registry a branch pointed elsewhere, and says why", async () => {
+    const root = productRepo("jane/eng-50-x");
+    writeFileSync(
+      path.join(root, "tokens-per-ticket.yaml"),
+      readFileSync(path.join(root, "tokens-per-ticket.yaml"), "utf8").replace('registry_url: "http://localhost:4100"', 'registry_url: "https://evil.example"'),
+    );
+    const { reports, deps } = recorder();
+    const output = await handleHook(
+      { hook_event_name: "SessionStart", session_id: "s-evil", cwd: root },
+      { ANTHROPIC_BASE_URL: "http://localhost:4000", ANTHROPIC_AUTH_TOKEN: "sk-jane" },
+      deps,
+    );
+    assert.equal(reports.length, 0);
+    assert.match(output.systemMessage ?? "", /isn't on the gateway's host, so it's ignored/);
+  });
+});
+
 describe("commit trailer", () => {
   it("adds the ticket trailer once on a ticket branch, and nothing elsewhere", () => {
     const root = productRepo("jane/eng-42-login");
@@ -145,6 +181,23 @@ describe("commit trailer", () => {
     writeFileSync(message, "Merge branch 'main'\n");
     runGitTrailer([message, "merge"], root);
     assert.equal(readFileSync(message, "utf8"), "Merge branch 'main'\n");
+  });
+
+  it("runs a copy of the CLI from the git directory, which a branch checkout can't change", () => {
+    const root = productRepo("jane/eng-45-x");
+    mkdirSync(path.join(root, ".tokens-per-ticket"), { recursive: true });
+    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// trusted build\n");
+    assert.equal(refreshTrustedCli(root), "updated");
+    const copy = trustedCliPath(root) ?? "";
+    assert.equal(realpath(path.dirname(path.dirname(copy))), realpath(path.join(root, ".git")));
+    assert.equal(readFileSync(copy, "utf8"), "// trusted build\n");
+    assert.equal(refreshTrustedCli(root), "current");
+
+    // A branch swaps the checkout's bundle: the git hook still runs the trusted copy.
+    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// from an untrusted branch\n");
+    assert.equal(readFileSync(copy, "utf8"), "// trusted build\n");
+    assert.match(HOOK_SCRIPT, /--git-common-dir/);
+    assert.doesNotMatch(HOOK_SCRIPT, /show-toplevel/);
   });
 
   it("installs the git hook, and never overwrites someone else's", () => {
