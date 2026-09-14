@@ -10,6 +10,7 @@ import { loadEnvLocal } from "../src/lib/env.ts";
 import { formatTokens, formatUsd } from "../src/lib/format.ts";
 import { summarizeTickets } from "../src/lib/ledger.ts";
 import { fetchTagActivity, lastDays } from "../src/lib/litellm.ts";
+import { requestsByKey, smokeLanded } from "../src/lib/smoke.ts";
 
 loadEnvLocal([process.cwd()]);
 const baseUrl = process.env.LITELLM_BASE_URL || "http://localhost:4000";
@@ -19,9 +20,23 @@ if (!apiKey) {
   process.exit(1);
 }
 
-const contract = loadContract();
+const loaded = loadContract();
+// SMOKE-* keys must parse even when the team narrows key.teams to [ENG, ...].
+const contract = { ...loaded, key: { ...loaded.key, teams: [] } };
 const calls: Record<string, number> = { "SMOKE-1": 3, "SMOKE-2": 1 };
+const keys = Object.keys(calls);
 const runId = Date.now().toString(36);
+const range = lastDays(1);
+
+async function smokeRequests(): Promise<{ rows: ReturnType<typeof summarizeTickets>; counts: Record<string, number> }> {
+  const rows = summarizeTickets(await fetchTagActivity(range, { baseUrl, apiKey: apiKey! }), contract).filter((row) =>
+    keys.includes(row.key),
+  );
+  return { rows, counts: requestsByKey(rows, keys) };
+}
+
+// Earlier runs already left SMOKE-* spend today. Only count what this run adds.
+const baseline = (await smokeRequests()).counts;
 
 console.log(`Sending tagged calls to ${baseUrl} (run ${runId})…`);
 for (const [key, count] of Object.entries(calls)) {
@@ -46,16 +61,13 @@ for (const [key, count] of Object.entries(calls)) {
   }
 }
 
-const range = lastDays(1);
 const before = Date.now();
 process.stdout.write("Waiting for LiteLLM to write spend");
 while (Date.now() - before < 120_000) {
   await new Promise((resolve) => setTimeout(resolve, 5_000));
   process.stdout.write(".");
-  const rows = summarizeTickets(await fetchTagActivity(range, { baseUrl, apiKey }), contract).filter((row) =>
-    row.key.startsWith("SMOKE-"),
-  );
-  if (rows.length === Object.keys(calls).length) {
+  const { rows, counts } = await smokeRequests();
+  if (smokeLanded(baseline, counts, calls)) {
     console.log("\n");
     for (const row of rows) {
       console.log(
