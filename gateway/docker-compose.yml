@@ -1,4 +1,5 @@
-# Local LiteLLM gateway with Postgres, so spend is stored and queryable.
+# Local LiteLLM gateway with Postgres, so spend is stored and queryable, plus
+# the session registry that lets the gateway tag calls with tickets on its own.
 #
 #   cp gateway/.env.example gateway/.env   # then fill in keys
 #   docker compose -f gateway/docker-compose.yml up -d
@@ -23,8 +24,11 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
+      TPT_REGISTRY_URL: http://registry:4100
     volumes:
       - ./litellm.config.yaml:/app/config.yaml:ro
+      # Loaded from config.yaml's directory by litellm_settings.callbacks.
+      - ./tokens_per_ticket.py:/app/tokens_per_ticket.py:ro
     depends_on:
       db:
         condition: service_healthy
@@ -36,6 +40,26 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+
+  # Which ticket each Claude Code session is on. Hooks in your repos report
+  # to it with the developer's gateway key; the gateway plugin reads it.
+  registry:
+    build: ../registry
+    ports:
+      - "127.0.0.1:4100:4100"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
+      LITELLM_URL: http://litellm:4000
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4100/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   db:
     image: postgres:16

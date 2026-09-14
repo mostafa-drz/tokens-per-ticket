@@ -28,6 +28,12 @@ model_list:
       input_cost_per_token: 0.000003
       output_cost_per_token: 0.000015
 
+litellm_settings:
+  # Tags Claude Code calls with the ticket their session is on, using the
+  # session registry. See gateway/tokens_per_ticket.py.
+  # https://docs.litellm.ai/docs/proxy/call_hooks
+  callbacks: tokens_per_ticket.proxy_handler_instance
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   # Keep raw per-request logs for 30 days. The cleanup job deletes
