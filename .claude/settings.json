@@ -2,22 +2,66 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(node --import tsx scripts/ticket-report.mts *)",
-      "Bash(node --import tsx scripts/ticket-start.mts *)",
       "Bash(pnpm test:unit)",
       "Bash(pnpm typecheck)",
-      "Bash(pnpm lint)"
+      "Bash(pnpm lint)",
+      "Bash(node .tokens-per-ticket/tpt.mjs report *)",
+      "Bash(node .tokens-per-ticket/tpt.mjs start *)"
     ]
   },
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume",
         "hooks": [
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/ticket-guard.mjs"]
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs",
+              "hook"
+            ]
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs",
+              "hook"
+            ]
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs",
+              "hook"
+            ]
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.tokens-per-ticket/tpt.mjs",
+              "hook"
+            ]
           }
         ]
       }
