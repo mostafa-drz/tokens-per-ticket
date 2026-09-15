@@ -66,7 +66,10 @@ export function createServer({ store, internalToken, log = () => {}, limiter = r
       send(res, 404, { error: "Not found." });
     } catch (error) {
       log(`error: ${error instanceof Error ? error.message : String(error)}`);
-      if (!res.headersSent) send(res, 500, { error: "Registry error." });
+      if (res.headersSent) return;
+      // "LiteLLM_VerificationToken" doesn't exist until LiteLLM's first start finishes.
+      if (error?.code === "42P01") return send(res, 503, { error: "LiteLLM hasn't created its tables yet. Try again shortly." });
+      send(res, 500, { error: "Registry error." });
     }
   });
 }

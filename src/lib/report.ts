@@ -42,7 +42,7 @@ export function renderReport(input: {
   // The query only sees the window. Spend on its first day usually means the
   // ticket started earlier, and --post would replace a fuller report with a
   // smaller number that reads like the total.
-  if (startsAtWindowEdge(detail, range)) {
+  if (range.startDate !== range.endDate && startsAtWindowEdge(detail, range)) {
     lines.push(
       "",
       `> ⚠ Spend was recorded on ${formatDay(range.startDate)}, the first day of this window, so earlier spend may be missing. Rerun with a larger \`--days\`.`,

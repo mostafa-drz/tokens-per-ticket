@@ -25,7 +25,8 @@ branch:
 
 tag:
   # Every model call made while working on ENG-123 carries the tag
-  # "ticket:ENG-123". LiteLLM aggregates spend per tag.
+  # "ticket:ENG-123". LiteLLM aggregates spend per tag. The gateway plugin
+  # reads its prefix from TPT_TAG_PREFIX; change both together.
   prefix: "ticket:"
 
 worktree:

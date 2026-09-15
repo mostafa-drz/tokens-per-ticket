@@ -63,6 +63,9 @@ export async function runInit(argv: string[]): Promise<void> {
     console.error(`\n✖ --teams takes team keys such as ENG,WEB.\n`);
     process.exit(1);
   }
+  if (registryUrl && registryUrl.startsWith("http:") && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(registryUrl)) {
+    done.push("⚠ --registry-url is plain HTTP: hooks send each engineer's gateway key there. Use HTTPS outside localhost");
+  }
   if (existsSync(configFile)) {
     done.push(`kept your ${CONTRACT_FILE}${registryUrl || teams.length ? " (edit it directly; --registry-url and --teams only apply to a new file)" : ""}`);
   } else {

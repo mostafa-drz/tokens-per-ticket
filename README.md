@@ -110,7 +110,7 @@ Locally, `pnpm gateway:up` runs all three. For a team, deploy LiteLLM with Postg
 Automatic attribution needs two more things next to LiteLLM:
 
 - **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it **LiteLLM's own Postgres** (`DATABASE_URL`): it keeps its one table in its own `tpt` schema (LiteLLM's upgrades drop unknown tables from `public`) and reads LiteLLM's key table, so it only accepts sessions reported with an active virtual key. Also give it a shared secret, `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS; the gateway plugin calls it on the internal network.
-- **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout. After a registry error it skips lookups for 15 seconds, so an outage costs attribution, not latency. The only calls it refuses are ones that set their own `ticket:` tag.
+- **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout. After three failed lookups in a row it skips new ones for 15 seconds, so an outage costs attribution, not latency. The only calls it refuses are ones that set their own `ticket:` tag.
 
 If you already run LiteLLM for your product, you can point development traffic at the same gateway, but check three things first:
 
@@ -274,7 +274,7 @@ key:
 branch:
   template: "{user}/{key}-{slug}"     # Linear's default "Copy git branch name"; {user}, {key}, {KEY}, {slug}
 tag:
-  prefix: "ticket:"
+  prefix: "ticket:"                   # the gateway plugin's TPT_TAG_PREFIX must match
 worktree:
   path: "../{repo}.worktrees/{branch}"
 automation:
