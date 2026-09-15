@@ -50,6 +50,8 @@ type Deps = {
   now: () => number;
 };
 
+/** In the repository's git directory, never in the working tree. */
+const FALLBACK_CLI = "tokens-per-ticket.mjs";
 const REPORT_EVERY_MS = 10 * 60_000;
 const RETRY_FAILED_MS = 60_000;
 
@@ -106,7 +108,10 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
 
   const startEvent = event === "SessionStart" || event === "CwdChanged";
   if (startEvent) ensureCommitTrailerHook(root, contract);
-  if (event === "SessionStart") pruneState(stateDir, now);
+  if (event === "SessionStart") {
+    pruneState(stateDir, now);
+    keepFallbackCopy(root);
+  }
 
   const title = event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
 
@@ -289,6 +294,25 @@ function sameRepo(root: string, projectDir: string | undefined): boolean {
   return Boolean(project) && project === common(root);
 }
 
+/**
+ * Keeps a copy of the committed CLI in this repository's git directory, for
+ * HOOK_COMMAND to run on a branch that has none (one from before adoption), so
+ * the hook can still clear the ticket the session was on. Refreshed at every
+ * session start; it only ever holds this repository's own committed CLI.
+ */
+function keepFallbackCopy(root: string): void {
+  try {
+    const source = path.join(root, BUNDLE_PATH);
+    const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root);
+    if (!commonDir || !existsSync(source)) return;
+    const copy = path.join(commonDir, FALLBACK_CLI);
+    if (existsSync(copy) && readFileSync(copy).equals(readFileSync(source))) return;
+    writeFileSync(copy, readFileSync(source));
+  } catch {
+    // Best effort: without it, a pre-adoption branch keeps the last ticket.
+  }
+}
+
 /** Drops session state older than 30 days. */
 function pruneState(sessionsDir: string, now: () => number): void {
   try {
@@ -311,12 +335,13 @@ function firstLine(error: unknown): string {
 
 /**
  * Claude Code settings entries for the hook, merged by `init`. Runs the
- * committed CLI at the checkout's root (the project dir may be a subfolder),
- * and does nothing where there is none, such as a branch from before adoption.
+ * committed CLI at the checkout's root (the project dir may be a subfolder).
+ * On a branch from before adoption, which has none, it runs the copy
+ * keepFallbackCopy leaves in the git directory, so the ticket still clears.
  * Claude Code exports CLAUDE_PROJECT_DIR to hook processes.
  * https://code.claude.com/docs/en/hooks
  */
-export const HOOK_COMMAND = `r="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null)" || r="$CLAUDE_PROJECT_DIR"; f="$r/${BUNDLE_PATH}"; [ -f "$f" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node "$f" hook`;
+export const HOOK_COMMAND = `r="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null)" || r="$CLAUDE_PROJECT_DIR"; f="$r/${BUNDLE_PATH}"; [ -f "$f" ] || f="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/${FALLBACK_CLI}"; [ -f "$f" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node "$f" hook`;
 
 export function hookSettings(): Record<string, unknown[]> {
   const handler = { type: "command", command: HOOK_COMMAND };

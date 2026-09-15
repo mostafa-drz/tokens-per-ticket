@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "r=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --show-toplevel 2>/dev/null)\" || r=\"$CLAUDE_PROJECT_DIR\"; f=\"$r/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node \"$f\" hook"
+            "command": "r=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --show-toplevel 2>/dev/null)\" || r=\"$CLAUDE_PROJECT_DIR\"; f=\"$r/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || f=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket.mjs\"; [ -f \"$f\" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node \"$f\" hook"
           }
         ]
       }
@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "r=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --show-toplevel 2>/dev/null)\" || r=\"$CLAUDE_PROJECT_DIR\"; f=\"$r/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node \"$f\" hook"
+            "command": "r=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --show-toplevel 2>/dev/null)\" || r=\"$CLAUDE_PROJECT_DIR\"; f=\"$r/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || f=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket.mjs\"; [ -f \"$f\" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node \"$f\" hook"
           }
         ]
       }
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "r=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --show-toplevel 2>/dev/null)\" || r=\"$CLAUDE_PROJECT_DIR\"; f=\"$r/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node \"$f\" hook"
+            "command": "r=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --show-toplevel 2>/dev/null)\" || r=\"$CLAUDE_PROJECT_DIR\"; f=\"$r/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || f=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket.mjs\"; [ -f \"$f\" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node \"$f\" hook"
           }
         ]
       }
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "r=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --show-toplevel 2>/dev/null)\" || r=\"$CLAUDE_PROJECT_DIR\"; f=\"$r/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node \"$f\" hook"
+            "command": "r=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --show-toplevel 2>/dev/null)\" || r=\"$CLAUDE_PROJECT_DIR\"; f=\"$r/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || f=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket.mjs\"; [ -f \"$f\" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node \"$f\" hook"
           }
         ]
       }

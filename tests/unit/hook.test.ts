@@ -248,10 +248,12 @@ describe("commit trailer", () => {
     assert.equal(run(HOOK_SCRIPT, ["MSG"]), "ran git-trailer");
   });
 
-  it("does nothing on a branch without the CLI", () => {
+  it("on a branch without the CLI, runs the copy in the git directory, or nothing", () => {
     const root = productRepo("jane/eng-47-x");
-    const out = execFileSync("sh", ["-c", HOOK_COMMAND], { cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8" });
-    assert.equal(out, "");
+    const run = () => execFileSync("sh", ["-c", HOOK_COMMAND], { cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8" });
+    assert.equal(run(), "");
+    writeFileSync(path.join(root, ".git/tokens-per-ticket.mjs"), 'console.log("ran the git directory copy")\n');
+    assert.equal(run().trim(), "ran the git directory copy");
   });
 
   it("doesn't tell Claude the session counts toward a ticket when the report failed", async () => {
