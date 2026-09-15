@@ -22,12 +22,10 @@ import {
 } from "../lib/contract.ts";
 import { branchExists, git, listWorktrees, localBranches, mainCheckoutRoot, tryGit } from "../lib/git.ts";
 import { claudeArgs, shellCommand, ticketBranches, userSettingsEnv } from "../lib/launch.ts";
-import { detectPackageManager, flagsTakenByNpm, installCommand } from "../lib/package-manager.ts";
 import { command } from "./hint.ts";
 
 export async function runStart(argv: string[]): Promise<void> {
-  const manager = detectPackageManager(tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd());
-  const run = (...args: string[]) => command(manager, "ticket:start", args);
+  const run = (...args: string[]) => command("start", args);
 
   const USAGE = `Usage: ${run("<TICKET-KEY>", "[short title]", "[--base <ref>]", "[--print]")}
 
@@ -39,15 +37,6 @@ export async function runStart(argv: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // npm keeps flags written before `--` for itself. Without this check
-  // `npm run ticket:start ENG-1 --print` would launch claude instead of printing,
-  // and `--base origin/main` would silently become part of the title.
-  const taken = flagsTakenByNpm(["print", "base", "help"]);
-  if (taken.length) {
-    fail(
-      `npm kept ${taken.map((flag) => `--${flag}`).join(", ")} for itself. Put the arguments after --:\n  ${run("<TICKET-KEY>", "[short title]", `--${taken[0]}`)}`,
-    );
-  }
 
   const { values, positionals } = parseArgs({
     args: argv,
@@ -114,7 +103,7 @@ export async function runStart(argv: string[]): Promise<void> {
       console.log(`✓ Created ${branch}`);
     }
     console.log(`✓ Worktree ${worktree}`);
-    console.log(`  Run \`${installCommand(manager)}\` there before running the app or its tests.`);
+    console.log("  Install the project's dependencies there before running its app or tests.");
   }
 
   // 3. Launch Claude Code in the worktree. The hooks report its branch, and the

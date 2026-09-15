@@ -14,13 +14,11 @@ import { currentBranch, mainCheckoutRoot, tryGit } from "../lib/git.ts";
 import { summarizeTicket } from "../lib/ledger.ts";
 import { reportPoster } from "../lib/post.ts";
 import { fetchTagActivity, lastDays } from "../lib/litellm.ts";
-import { detectPackageManager, flagsTakenByNpm } from "../lib/package-manager.ts";
 import { renderReport } from "../lib/report.ts";
 import { command } from "./hint.ts";
 
 export async function runReport(argv: string[]): Promise<void> {
-  const manager = detectPackageManager(tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd());
-  const run = (...args: string[]) => command(manager, "ticket:report", args);
+  const run = (...args: string[]) => command("report", args);
 
   const USAGE = `Usage: ${run("[TICKET-KEY | --branch <name>]", "[--days <n>]", "[--post]")}
 
@@ -35,12 +33,6 @@ export async function runReport(argv: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // npm keeps flags written before `--` for itself: `npm run ticket:report
-  // ENG-1 --post` would print the report, skip Linear, and exit 0.
-  const taken = flagsTakenByNpm(["post", "days", "branch", "help"]);
-  if (taken.length) {
-    fail(`npm kept ${taken.map((flag) => `--${flag}`).join(", ")} for itself. Put the arguments after --:\n  ${run("ENG-123", `--${taken[0]}`)}`);
-  }
 
   const { values, positionals } = parseArgs({
     args: argv,
