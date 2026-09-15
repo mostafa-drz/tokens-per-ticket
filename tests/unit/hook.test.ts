@@ -161,6 +161,30 @@ describe("session hook", () => {
     assert.equal(output.hookSpecificOutput?.watchPaths?.length, 1);
   });
 
+  it("keeps retrying when the registry couldn't be told the session left its ticket", async () => {
+    const root = productRepo("jane/eng-54-x");
+    const env = { ...connected, CLAUDE_PROJECT_DIR: root };
+    let clock = 1_000_000;
+    const ok = recorder();
+    await handleHook({ hook_event_name: "SessionStart", session_id: "s-retry", cwd: root }, env, { ...ok.deps, now: () => clock });
+    rmSync(path.join(root, "tokens-per-ticket.yaml"));
+
+    const down = recorder(false);
+    const deps = { ...down.deps, stateDir: ok.deps.stateDir, now: () => clock };
+    const output = await handleHook({ hook_event_name: "FileChanged", session_id: "s-retry", cwd: root }, env, deps);
+    assert.match(output.systemMessage ?? "", /may still count toward ENG-54/);
+    assert.doesNotMatch(output.systemMessage ?? "", /no longer counts/);
+
+    clock += 61_000;
+    const back = { ...ok.deps, now: () => clock };
+    const retried = await handleHook({ hook_event_name: "UserPromptSubmit", session_id: "s-retry", cwd: root }, env, back);
+    assert.deepEqual(
+      ok.reports.map((r) => r.ticket),
+      ["ENG-54", null],
+    );
+    assert.match(retried.systemMessage ?? "", /no longer counts toward ENG-54/);
+  });
+
   it("ignores another repo's config when the session moves into it", async () => {
     const project = productRepo("jane/eng-53-x");
     const other = productRepo("mallory/eng-666-x");

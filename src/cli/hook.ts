@@ -75,9 +75,16 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     const watchPaths = event === "FileChanged" && headPath ? [headPath] : undefined;
     const left = input.session_id ? await leaveTicket(input.session_id, env, { report, stateDir, now }) : null;
     if (left) {
+      const here = !root
+        ? "this directory isn't a git repository"
+        : existsSync(path.join(root, CONTRACT_FILE))
+          ? "this is a different repository"
+          : "this branch predates tokens-per-ticket (merge your default branch into it to attribute it)";
       return withEvent(event, {
         watchPaths,
-        systemMessage: `tokens-per-ticket: ${root ? "this checkout isn't set up for tokens-per-ticket" : "this directory isn't a git repository"}, so the session no longer counts toward ${left}.`,
+        systemMessage: left.ok
+          ? `tokens-per-ticket: ${here}, so the session no longer counts toward ${left.ticket}.`
+          : `tokens-per-ticket: ${here}, but the registry couldn't be told (${left.reason.replace(/\.$/, "")}), so calls may still count toward ${left.ticket}. It retries within a minute, on your next prompt.`,
       });
     }
     return event === "SessionStart" || event === "CwdChanged" || watchPaths ? withEvent(event, { watchPaths }) : {};
@@ -160,7 +167,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     return problems.length && reported === "failed" ? { systemMessage: `tokens-per-ticket: ${problems.join(" ")}` } : {};
   }
 
-  if (event === "FileChanged") {
+  if (event === "FileChanged" || event === "CwdChanged") {
     const moved = reported === "sent" ? `tokens-per-ticket: now counting toward ${ticket ?? "no ticket"} (${branch ?? "detached HEAD"}).` : undefined;
     return withEvent(event, {
       watchPaths,
@@ -230,16 +237,20 @@ function git(args: string[], cwd: string): string {
 type State = { ticket: string | null; branch: string | null; root: string; registryUrl?: string; at: number; failed: boolean; reason: string };
 
 /** Reports "no ticket" for a session last reported on one. Returns that ticket, if it did. */
-async function leaveTicket(sessionId: string, env: Env, { report, stateDir, now }: Deps): Promise<string | null> {
+async function leaveTicket(
+  sessionId: string,
+  env: Env,
+  { report, stateDir, now }: Deps,
+): Promise<{ ticket: string; ok: boolean; reason: string } | null> {
   const state = readState(stateDir, sessionId);
   const gatewayKey = gatewayKeyFrom(env);
   if (!state?.ticket || !state.registryUrl || !gatewayKey) return null;
-  const result = await report(
-    { session_id: sessionId, ticket: null, event: "left" },
-    { registryUrl: state.registryUrl, gatewayKey },
-  );
-  writeState(stateDir, sessionId, { ...state, ticket: null, branch: null, at: now(), failed: !result.ok, reason: result.ok ? "" : result.reason });
-  return state.ticket;
+  // After a failure, keep the ticket (so a later event retries) but don't retry more than once a minute.
+  if (state.failed && now() - state.at < RETRY_FAILED_MS) return null;
+  const result = await report({ session_id: sessionId, ticket: null, event: "left" }, { registryUrl: state.registryUrl, gatewayKey });
+  if (result.ok) writeState(stateDir, sessionId, { ...state, ticket: null, branch: null, at: now(), failed: false, reason: "" });
+  else writeState(stateDir, sessionId, { ...state, at: now(), failed: true, reason: result.reason });
+  return { ticket: state.ticket, ok: result.ok, reason: result.ok ? "" : result.reason };
 }
 
 function readState(dir: string, sessionId: string): State | null {
