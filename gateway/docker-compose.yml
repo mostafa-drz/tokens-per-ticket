@@ -20,9 +20,8 @@ services:
       # so publishing on 0.0.0.0 would hand admin access to anyone on the
       # network. A team gateway belongs behind TLS, per LiteLLM's deploy guide.
       - "127.0.0.1:4000:4000"
-    env_file:
-      - .env
     environment:
+      TPT_REGISTRY_TOKEN: ${TPT_REGISTRY_TOKEN}
       DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
       TPT_REGISTRY_URL: http://registry:4100
     volumes:
@@ -42,15 +41,14 @@ services:
       start_period: 60s
 
   # Which ticket each Claude Code session is on. Hooks in your repos report to
-  # it with a fingerprint of the developer's key (never the key); the gateway
-  # plugin reads it.
+  # it with the developer's virtual key (serve it over HTTPS in production); the
+  # gateway plugin reads it. It gets only its own secret, not LiteLLM's keys.
   registry:
     build: ../registry
     ports:
       - "127.0.0.1:4100:4100"
-    env_file:
-      - .env
     environment:
+      TPT_REGISTRY_TOKEN: ${TPT_REGISTRY_TOKEN}
       DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
     depends_on:
       db:

@@ -78,7 +78,7 @@ export async function runReport(argv: string[]): Promise<void> {
       console.log(`\n${key}'s spend is in the ledger: ${new URL(`/tickets/${encodeURIComponent(key)}`, ledger)}\n`);
       process.exit(0);
     }
-    fail("Set LITELLM_API_KEY in .env.local (see .env.example). It reads the whole organization's spend, so it belongs in CI or with a lead, not on every laptop.");
+    fail("Set LITELLM_BASE_URL and LITELLM_API_KEY in the environment or .env.local (keep .env.local out of git). The key reads the whole organization's spend, so it belongs in CI or with a lead, not on every laptop.");
   }
   const baseUrl = process.env.LITELLM_BASE_URL || "http://localhost:4000";
 

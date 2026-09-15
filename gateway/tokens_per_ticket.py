@@ -11,8 +11,9 @@ unchanged. Subagents share their session's id, so they count toward its ticket.
 
 Rules:
 - Only the registry sets tickets. With the plugin on, a request that sets its
-  own `ticket:` tag (header or body) is refused with a clear error, so a key
-  can't charge its spend to an arbitrary ticket.
+  own `ticket:` tag (header or body) is refused with a clear error. A key can
+  still report its own session on any ticket, as it could by naming a branch:
+  attribution is for visibility, not billing enforcement.
 - Pass-through routes (/anthropic/*, /vertex_ai/*, ...) give this hook no
   request headers, and LiteLLM applies their tag headers after it runs, so a
   ticket claim there can't be checked. They're refused unless

@@ -15,7 +15,7 @@ key:
   teams: []
 
 branch:
-  # Used by `ticket:start` to name new branches.
+  # Used by `tpt start` to name new branches.
   # {user} = git user slug, {key} = lowercased ticket key, {KEY} = ticket key
   # as printed (use it for Jira, which only links uppercase keys),
   # {slug} = short title (optional; dropped with its separator when empty).

@@ -187,8 +187,8 @@ That's the only per-person step, and it isn't even that with [managed settings](
 In the product repository, run the CLI from a clone of this repo:
 
 ```bash
-node ../tokens-per-ticket/.tokens-per-ticket/tpt.mjs init --registry-url https://tpt-registry.your-company.dev
-git add tokens-per-ticket.yaml .tokens-per-ticket .claude && git commit -m "chore: adopt tokens-per-ticket"
+node ../tokens-per-ticket/.tokens-per-ticket/tpt.mjs init --registry-url https://litellm.your-company.dev:4100
+git add tokens-per-ticket.yaml .tokens-per-ticket .claude .gitignore && git commit -m "chore: adopt tokens-per-ticket"
 ```
 
 `init` is safe to run again, and it only adds:
@@ -197,7 +197,8 @@ git add tokens-per-ticket.yaml .tokens-per-ticket .claude && git commit -m "chor
 - **`.tokens-per-ticket/tpt.mjs`**, the whole CLI in one file with no dependencies. Nothing to install, no `tsconfig` or `package.json` changes, and it works with npm, pnpm, or no Node project at all. Fresh clones and worktrees have it as soon as they check out.
 - **Hooks and permissions merged into `.claude/settings.json`**. Existing entries are kept.
 - **The `/ticket-cost` and `/ticket-start` skills.**
-- **A `prepare-commit-msg` git hook** for the commit trailer, plus the copy of the CLI that all hooks run, both in `.git`. They're installed in `.git/hooks` (or your `core.hooksPath`), and the session hook sets them up in new clones. An existing hook, such as husky's, is never overwritten; `init` tells you the one line to add to it.
+- **`.env.local` in `.gitignore`**, if it isn't ignored yet. `tpt report` reads its spend key from there.
+- **A `prepare-commit-msg` git hook** for the commit trailer, in `.git/hooks` (or your `core.hooksPath`). The session hook installs it in new clones too. An existing hook, such as husky's, is never overwritten; `init` tells you the one line to add to it.
 
 Commit the files: every clone and worktree needs them.
 
@@ -326,7 +327,7 @@ To deploy against a real gateway:
 
 Everything lives in the repo and is committed, so the whole team gets it:
 
-- **Hooks.** In `.claude/settings.json`, `SessionStart`, `UserPromptSubmit`, `FileChanged`, and `CwdChanged` all run `tpt hook` (source: `src/cli/hook.ts`), from the copy of the CLI kept in `.git`. The hook reports the session, keeps `.git/HEAD` watched, names the session after its ticket unless you named it yourself, and warns once when something is missing. It never blocks. Each run takes about 60 ms, and it only calls the registry when something changed or every 10 minutes.
+- **Hooks.** In `.claude/settings.json`, `SessionStart`, `UserPromptSubmit`, `FileChanged`, and `CwdChanged` all run `tpt hook` (source: `src/cli/hook.ts`). The hook reports the session, keeps `.git/HEAD` watched, names the session after its ticket unless you named it yourself, and warns once when something is missing. It never blocks. Each run takes about 60 ms, and it only calls the registry when something changed or every 10 minutes.
 - **`/ticket-cost`** runs the report and adds up to three observations the numbers support. It posts to the tracker only when you ask.
 - **`/ticket-start ENG-123 title`** prepares a separate worktree and gives you the command to paste.
 
@@ -344,8 +345,8 @@ Everything lives in the repo and is committed, so the whole team gets it:
 
 - **Only the gateway sets tickets.** With the plugin on, a request that sets its own `ticket:` tag (in `x-litellm-tags` or the body) gets a clear 400, and so do pass-through routes such as `/anthropic/*`, where tags can't be checked (`TPT_ALLOW_PASS_THROUGH=true` if a shared gateway needs them). Developer keys with `allowed_routes: ["anthropic_routes"]` can't reach pass-through at all. LiteLLM's spend logging reads a copy of the request metadata taken before plugins run, so the plugin writes the ticket there too (checked on `v1.100.1`).
 - **The registry authenticates with the developer's own key.** The hook sends the LiteLLM virtual key it already uses as a bearer token, and only to a trusted registry URL (below). The registry hashes it, looks it up by primary key in LiteLLM's key table (active, not blocked, not expired), and stores only `sha256(key)`, the form LiteLLM gives plugins. A session belongs to the key that first reported it, and the plugin only tags calls from that key, so a report can only ever attribute the reporter's own calls. The master key isn't a virtual key, so its sessions aren't attributed and the hook says so. The registry needs `SELECT` on `LiteLLM_VerificationToken` and its own `tpt_sessions` table; in production give it a role with only that.
-- **The registry URL comes from trusted config.** `TPT_REGISTRY_URL` belongs in the user's or the organization's Claude Code settings. A repo's `automation.registry_url` is only used on the same host as the user's own `ANTHROPIC_BASE_URL`.
-- **Which code the hooks run.** Once a clone is set up, the Claude Code hooks and the git hook run a copy of the CLI in `.git/tokens-per-ticket/`, not the checkout's `.tokens-per-ticket/tpt.mjs`. A branch that swaps the bundle changes nothing that runs; only an explicit `tpt init` replaces the copy, and the session hook reports when a branch carries a different one. A branch can still change `.claude/settings.json` itself, which is [Claude Code's trust model](https://code.claude.com/docs/en/permissions) for any project hook: review changes to `.claude/` like any other code.
+- **The registry URL comes from trusted config.** `TPT_REGISTRY_URL` belongs in the user's or the organization's Claude Code settings. A repo's `automation.registry_url` is only used on the same host as the user's own `ANTHROPIC_BASE_URL`, over HTTPS (plain HTTP only on localhost), so a branch can't send keys anywhere else.
+- **Which code the hooks run.** The Claude Code hooks and the git hook run the committed `.tokens-per-ticket/tpt.mjs`, the way husky runs committed scripts. A branch can change that file, and it can change `.claude/settings.json` itself, which is [Claude Code's trust model](https://code.claude.com/docs/en/permissions) for any project hook. Review changes to `.claude/` and `.tokens-per-ticket/` like any other code, for example with a CODEOWNERS entry.
 
 **Accuracy**
 

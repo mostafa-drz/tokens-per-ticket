@@ -1,10 +1,10 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { CONTRACT_FILE, loadContract } from "../lib/contract.ts";
 import { tryGit } from "../lib/git.ts";
-import { ensureCommitTrailerHook, refreshTrustedCli } from "./git-trailer.ts";
+import { ensureCommitTrailerHook } from "./git-trailer.ts";
 import { BUNDLE_PATH } from "./hint.ts";
 import { hookSettings } from "./hook.ts";
 
@@ -16,6 +16,7 @@ import { hookSettings } from "./hook.ts";
  *   3. hooks and permissions merged into .claude/settings.json (nothing removed)
  *   4. /ticket-cost and /ticket-start skills
  *   5. the prepare-commit-msg hook for the commit trailer
+ *   6. .env.local in .gitignore: `tpt report` reads an org-wide spend key from it
  *
  * Safe to run again: it only adds what's missing, and refreshes the bundle.
  */
@@ -94,8 +95,7 @@ export async function runInit(argv: string[]): Promise<void> {
     done.push(`added the /${name} skill`);
   }
 
-  // 5. Commit trailer hook, running a copy of the CLI kept in the git directory
-  refreshTrustedCli(root, { replace: true });
+  // 5. Commit trailer hook
   const hook = ensureCommitTrailerHook(root, contract);
   if (hook === "installed" || hook === "present") done.push(`commit trailer "${contract.automation.commit_trailer}: <KEY>" is on`);
   if (hook === "foreign") {
@@ -104,13 +104,22 @@ export async function runInit(argv: string[]): Promise<void> {
     );
   }
 
+  // 6. Keep the spend key out of git
+  if (tryGit(["check-ignore", "-q", ".env.local"], root) === null) {
+    const gitignore = path.join(root, ".gitignore");
+    const current = existsSync(gitignore) ? readFileSync(gitignore, "utf8") : "";
+    appendFileSync(gitignore, `${current && !current.endsWith("\n") ? "\n" : ""}.env.local\n`);
+    done.push("added .env.local to .gitignore");
+  }
+
   console.log(`\n✓ tokens-per-ticket is set up in ${root}\n`);
   for (const line of done) console.log(`  • ${line}`);
   console.log(`
 Next:
-  1. Commit ${CONTRACT_FILE}, ${path.dirname(BUNDLE_PATH)}/, and .claude/ so every clone and worktree has them.
+  1. Commit ${CONTRACT_FILE}, ${path.dirname(BUNDLE_PATH)}/, .claude/, and .gitignore so every clone and worktree has them.
   2. Each engineer, once (or your org, through managed settings), in ~/.claude/settings.json:
        "env": { "ANTHROPIC_BASE_URL": "<your LiteLLM URL>", "ANTHROPIC_AUTH_TOKEN": "<their gateway key>" }
+     If the registry isn't an HTTPS URL on the gateway's host, add "TPT_REGISTRY_URL": "<registry URL>".
   That's it. Sessions on ticket branches are attributed automatically, including branch switches.
 `);
 }
