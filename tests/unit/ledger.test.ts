@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { loadContract } from "../../src/lib/contract.ts";
 import { cacheReadShare, claudeCodeUsage, summarizeTicket, summarizeTickets } from "../../src/lib/ledger.ts";
-import { fetchTagActivity, lastDays, LiteLLMError, mergeDays, PAGE_SIZE, type DailySpend } from "../../src/lib/litellm.ts";
+import { datesBetween, fetchTagActivity, lastDays, LiteLLMError, mergeDays, PAGE_SIZE, type DailySpend } from "../../src/lib/litellm.ts";
 
 const contract = loadContract();
 
@@ -62,31 +62,35 @@ describe("summarizeTicket (one tag)", () => {
 });
 
 describe("fetchTagActivity", () => {
-  it("follows pages and merges a date split across them", async () => {
+  it("fetches each day separately and follows its pages", async () => {
     const page = (date: string, spend: number, hasMore: boolean) => ({
       results: [{ date, metrics: { spend, api_requests: 1 }, breakdown: { entities: { "ticket:TPT-1": { metrics: { spend, api_requests: 1 } } } } }],
-      metadata: { has_more: hasMore },
+      metadata: { has_more: hasMore, total_spend: 3 },
     });
-    const pages = [page("2026-09-14", 1, true), page("2026-09-14", 2, true), page("2026-09-13", 4, false)];
-    const seen: string[] = [];
+    const pages: Record<string, unknown[]> = {
+      "2026-09-14": [page("2026-09-14", 1, true), page("2026-09-14", 2, false)],
+      "2026-09-13": [page("2026-09-13", 4, false)],
+    };
+    const seen: URL[] = [];
 
     const days = await fetchTagActivity(
       { tags: ["ticket:TPT-1"], startDate: "2026-09-13", endDate: "2026-09-14" },
       {
         baseUrl: "http://gateway.test",
         apiKey: "sk-test",
-        fetch: async (url) => {
-          seen.push(String(url));
-          return Response.json(pages[seen.length - 1]);
+        fetch: async (input) => {
+          const url = new URL(String(input));
+          seen.push(url);
+          const date = url.searchParams.get("start_date")!;
+          assert.equal(url.searchParams.get("end_date"), date);
+          return Response.json(pages[date][Number(url.searchParams.get("page")) - 1]);
         },
       },
     );
 
     assert.equal(seen.length, 3);
-    assert.match(seen[0], /tags=ticket%3ATPT-1/);
-    // Large pages: a busy org's month of rows must fit in MAX_PAGES requests.
-    assert.equal(new URL(seen[0]).searchParams.get("page_size"), String(PAGE_SIZE));
-    assert.ok(PAGE_SIZE >= 1000);
+    assert.equal(seen[0].searchParams.get("tags"), "ticket:TPT-1");
+    assert.equal(seen[0].searchParams.get("page_size"), String(PAGE_SIZE));
     assert.deepEqual(
       days.map((d) => [d.date, d.metrics.spend]),
       [
@@ -97,6 +101,29 @@ describe("fetchTagActivity", () => {
     const [row] = summarizeTickets(days, contract);
     assert.equal(row.activeDays, 2);
     assert.equal(row.spend, 7);
+  });
+
+  it("refetches a day whose total moved between its pages, so no row counts twice", async () => {
+    let calls = 0;
+    const responses = [
+      // First pass: a row landed between page 1 and page 2.
+      { results: [{ date: "2026-09-14", metrics: { spend: 1 } }], metadata: { has_more: true, total_spend: 2 } },
+      { results: [{ date: "2026-09-14", metrics: { spend: 1 } }], metadata: { has_more: false, total_spend: 3 } },
+      // Second pass is stable.
+      { results: [{ date: "2026-09-14", metrics: { spend: 2 } }], metadata: { has_more: true, total_spend: 3 } },
+      { results: [{ date: "2026-09-14", metrics: { spend: 1 } }], metadata: { has_more: false, total_spend: 3 } },
+    ];
+    const days = await fetchTagActivity(
+      { startDate: "2026-09-14", endDate: "2026-09-14" },
+      { baseUrl: "http://gateway.test", apiKey: "sk-test", fetch: async () => Response.json(responses[calls++]) },
+    );
+    assert.equal(calls, 4);
+    assert.equal(days[0].metrics.spend, 3);
+  });
+
+  it("lists dates newest first and refuses more than a year", () => {
+    assert.deepEqual(datesBetween("2026-02-27", "2026-03-01"), ["2026-03-01", "2026-02-28", "2026-02-27"]);
+    assert.throws(() => datesBetween("2024-01-01", "2026-01-01"), /a year or less/);
   });
 
   it("explains auth failures", async () => {

@@ -42,8 +42,9 @@ const ActivityPage = z.object({
     .object({
       page: z.number().default(1),
       has_more: z.boolean().default(false),
+      total_spend: z.number().default(0),
     })
-    .default({ page: 1, has_more: false }),
+    .default({ page: 1, has_more: false, total_spend: 0 }),
 });
 
 export type SpendMetrics = z.infer<typeof Metrics>;
@@ -77,64 +78,113 @@ export class LiteLLMError extends Error {
 /**
  * LiteLLM pages over raw LiteLLM_DailyTagSpend rows: one per (date, tag, key,
  * model, provider, endpoint...), and the all-tags query also returns every
- * User-Agent tag row. A 40-developer org writes on the order of 10,000 rows a
- * month, so 100 rows a page ran out of pages on the default 30-day view.
- * `page_size` has no upper bound in get_tag_daily_activity (v1.100.1,
- * tag_management_endpoints.py), and fewer pages also shrink the window in
- * which a newly inserted row shifts the offsets between two page requests.
+ * User-Agent tag row. `page_size` has no upper bound in get_tag_daily_activity
+ * (v1.100.1, tag_management_endpoints.py), and there is no aggregated tag
+ * endpoint, so the client fetches one day at a time: each day stays a page or
+ * two even for a few hundred engineers, days load in parallel, and finished
+ * days are cached.
  */
 export const PAGE_SIZE = 1000;
-const MAX_PAGES = 50;
+const PAGES_PER_DAY = 50;
+const PARALLEL_DAYS = 6;
 
 /**
- * Fetches every page for the query. LiteLLM paginates over raw daily rows
- * (one per tag, day, key, model...), and each page comes back already grouped
- * by day. Summing across pages counts each row exactly once.
+ * Days that can no longer change. LiteLLM writes spend in batches, so the day
+ * before today (UTC) can still grow for a while after midnight.
+ */
+const closedDays = new Map<string, DailySpend | null>();
+const CLOSED_DAYS_LIMIT = 5_000;
+
+/**
+ * Fetches spend for every day in the query, newest first. Summing the pages of
+ * one day counts each raw row once.
  */
 export async function fetchTagActivity(
   query: TagActivityQuery,
   config: LiteLLMConfig,
+  now: Date = new Date(),
 ): Promise<DailySpend[]> {
-  const doFetch = config.fetch ?? fetch;
-  const days: DailySpend[] = [];
+  const dates = datesBetween(query.startDate, query.endDate);
+  const lastChanging = isoDate(new Date(now.getTime() - 86_400_000));
+  const days: (DailySpend | null)[] = new Array(dates.length);
 
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const url = new URL("/tag/daily/activity", config.baseUrl);
-    url.searchParams.set("start_date", query.startDate);
-    url.searchParams.set("end_date", query.endDate);
-    url.searchParams.set("page", String(page));
-    url.searchParams.set("page_size", String(PAGE_SIZE));
-    if (query.tags?.length) url.searchParams.set("tags", query.tags.join(","));
-
-    let response: Response;
-    try {
-      response = await doFetch(url, {
-        headers: { Authorization: `Bearer ${config.apiKey}` },
-        cache: "no-store",
-      });
-    } catch (cause) {
-      throw new LiteLLMError(
-        `Could not reach LiteLLM at ${config.baseUrl}. Is the gateway running? (${String(cause)})`,
-      );
+  let next = 0;
+  async function worker() {
+    while (next < dates.length) {
+      const index = next++;
+      const date = dates[index];
+      const cacheKey = `${config.baseUrl}|${query.tags?.join(",") ?? "*"}|${date}`;
+      if (closedDays.has(cacheKey)) {
+        days[index] = closedDays.get(cacheKey)!;
+        continue;
+      }
+      days[index] = await fetchDay(date, query.tags, config);
+      if (date < lastChanging && !config.fetch) {
+        if (closedDays.size >= CLOSED_DAYS_LIMIT) closedDays.clear();
+        closedDays.set(cacheKey, days[index]);
+      }
     }
+  }
+  await Promise.all(Array.from({ length: Math.min(PARALLEL_DAYS, dates.length) }, worker));
+  return mergeDays(days.filter((day): day is DailySpend => day !== null));
+}
 
-    if (!response.ok) {
-      const hint =
-        response.status === 401 || response.status === 403
-          ? " Check that the key can read spend routes (the master key or an admin key)."
-          : "";
-      throw new LiteLLMError(
-        `LiteLLM returned ${response.status} for /tag/daily/activity.${hint}`,
-        response.status,
-      );
+/**
+ * One day, all pages. Pages are offsets over rows ordered by (date, id), so a
+ * row inserted between two page requests would shift the offsets and repeat a
+ * row. When a day spans several pages and its total moved meanwhile, fetch it
+ * again.
+ */
+async function fetchDay(date: string, tags: string[] | undefined, config: LiteLLMConfig): Promise<DailySpend | null> {
+  for (let attempt = 1; ; attempt++) {
+    const pages: z.infer<typeof ActivityPage>[] = [];
+    for (let page = 1; ; page++) {
+      if (page > PAGES_PER_DAY) throw new LiteLLMError(`${date} has more than ${PAGES_PER_DAY * PAGE_SIZE} spend rows.`);
+      const parsed = await fetchPage(date, page, tags, config);
+      pages.push(parsed);
+      if (!parsed.metadata.has_more) break;
     }
+    const moved = pages.length > 1 && pages[0].metadata.total_spend !== pages.at(-1)!.metadata.total_spend;
+    if (!moved || attempt === 3) return mergeDays(pages.flatMap((page) => page.results))[0] ?? null;
+  }
+}
 
-    const parsed = ActivityPage.parse(await response.json());
-    days.push(...parsed.results);
-    if (!parsed.metadata.has_more) return mergeDays(days);
+async function fetchPage(date: string, page: number, tags: string[] | undefined, config: LiteLLMConfig) {
+  const url = new URL("/tag/daily/activity", config.baseUrl);
+  url.searchParams.set("start_date", date);
+  url.searchParams.set("end_date", date);
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("page_size", String(PAGE_SIZE));
+  if (tags?.length) url.searchParams.set("tags", tags.join(","));
+
+  let response: Response;
+  try {
+    response = await (config.fetch ?? fetch)(url, {
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      cache: "no-store",
+    });
+  } catch (cause) {
+    throw new LiteLLMError(`Could not reach LiteLLM at ${config.baseUrl}. Is the gateway running? (${String(cause)})`);
   }
 
-  throw new LiteLLMError(`Stopped after ${MAX_PAGES} pages. Narrow the date range.`);
+  if (!response.ok) {
+    const hint =
+      response.status === 401 || response.status === 403
+        ? " Check that the key can read spend routes (the master key or an admin key)."
+        : "";
+    throw new LiteLLMError(`LiteLLM returned ${response.status} for /tag/daily/activity.${hint}`, response.status);
+  }
+  return ActivityPage.parse(await response.json());
+}
+
+/** Every date from start to end, inclusive, newest first. */
+export function datesBetween(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  for (let day = new Date(`${endDate}T00:00:00Z`); isoDate(day) >= startDate; day.setUTCDate(day.getUTCDate() - 1)) {
+    dates.push(isoDate(day));
+    if (dates.length > 366) throw new LiteLLMError("Ask for a year or less at a time.");
+  }
+  return dates;
 }
 
 /**
