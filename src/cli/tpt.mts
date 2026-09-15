@@ -42,6 +42,9 @@ export async function main(argv: string[]): Promise<void> {
         // A hook must never break the session.
         process.stdout.write(JSON.stringify({ systemMessage: `tokens-per-ticket hook error: ${error instanceof Error ? error.message : error}` }));
       }
+      // Claude Code waits for the process to exit. A registry request that
+      // timed out can still hold a socket open for seconds, so don't wait for it.
+      process.stdout.write("", () => process.exit(0));
       return;
     }
     case "git-trailer":

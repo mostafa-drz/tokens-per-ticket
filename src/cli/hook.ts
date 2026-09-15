@@ -327,7 +327,7 @@ function firstLine(error: unknown): string {
  * the copy kept next to the session state. Claude Code exports
  * CLAUDE_PROJECT_DIR to hook processes. https://code.claude.com/docs/en/hooks
  */
-export const HOOK_COMMAND = `r="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null)" || r="$CLAUDE_PROJECT_DIR"; f="$r/${BUNDLE_PATH}"; [ -f "$f" ] || f="\${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs"; [ -f "$f" ] || exit 0; node "$f" hook`;
+export const HOOK_COMMAND = `r="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null)" || r="$CLAUDE_PROJECT_DIR"; f="$r/${BUNDLE_PATH}"; [ -f "$f" ] || f="\${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs"; [ -f "$f" ] || exit 0; command -v node >/dev/null 2>&1 || exit 0; node "$f" hook`;
 
 export function hookSettings(): Record<string, unknown[]> {
   const handler = { type: "command", command: HOOK_COMMAND };

@@ -195,7 +195,7 @@ git add tokens-per-ticket.yaml .tokens-per-ticket .claude .gitignore && git comm
 `init` is safe to run again, and it only adds:
 
 - **`tokens-per-ticket.yaml`**, with Linear-style branch rules. Edit it if your branches look different ([the contract](#the-ticket-contract)).
-- **`.tokens-per-ticket/tpt.mjs`**, the whole CLI in one file with no dependencies. Nothing to install, no `tsconfig` or `package.json` changes, and it works with npm, pnpm, or no Node project at all. Fresh clones and worktrees have it as soon as they check out.
+- **`.tokens-per-ticket/tpt.mjs`**, the whole CLI in one file with no dependencies. Every engineer needs Node 18 or newer on their PATH (the hook skips silently without it); nothing else to install, no `tsconfig` or `package.json` changes, and it works with npm, pnpm, or no Node project at all. Fresh clones and worktrees have it as soon as they check out.
 - **Hooks and permissions merged into `.claude/settings.json`**. Existing entries are kept.
 - **The `/ticket-cost` and `/ticket-start` skills.**
 - **`.env.local` in `.gitignore`**, if it isn't ignored yet. `tpt report` reads its spend key from there.
