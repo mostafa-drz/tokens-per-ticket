@@ -51,8 +51,13 @@ export async function runInit(argv: string[]): Promise<void> {
 
   // 1. Config
   const configFile = path.join(root, CONTRACT_FILE);
+  const registryUrl = values["registry-url"];
+  if (registryUrl && !/^https?:\/\/[^/]/.test(registryUrl)) {
+    console.error(`\n✖ --registry-url must be a full http(s) URL, such as https://litellm.your-company.dev:4100\n`);
+    process.exit(1);
+  }
   if (existsSync(configFile)) {
-    done.push(`kept your ${CONTRACT_FILE}`);
+    done.push(`kept your ${CONTRACT_FILE}${registryUrl ? ` (edit automation.registry_url there; --registry-url only applies to a new file)` : ""}`);
   } else {
     let config = defaultConfig();
     if (values["registry-url"]) config = config.replace(/registry_url: ".*"/, `registry_url: "${values["registry-url"]}"`);
@@ -98,6 +103,9 @@ export async function runInit(argv: string[]): Promise<void> {
   // 5. Commit trailer hook
   const hook = ensureCommitTrailerHook(root, contract);
   if (hook === "installed" || hook === "present") done.push(`commit trailer "${contract.automation.commit_trailer}: <KEY>" is on`);
+  if (hook === "tracked") {
+    done.push(`git hooks live in the repository (core.hooksPath), so the commit trailer was not installed. Add \`node ${BUNDLE_PATH} git-trailer "$@"\` to its prepare-commit-msg`);
+  }
   if (hook === "foreign") {
     done.push(
       `a prepare-commit-msg hook already exists, so the commit trailer was not installed. To keep both, call \`node ${BUNDLE_PATH} git-trailer "$@"\` from it`,
@@ -119,7 +127,6 @@ Next:
   1. Commit ${CONTRACT_FILE}, ${path.dirname(BUNDLE_PATH)}/, .claude/, and .gitignore so every clone and worktree has them.
   2. Each engineer, once (or your org, through managed settings), in ~/.claude/settings.json:
        "env": { "ANTHROPIC_BASE_URL": "<your LiteLLM URL>", "ANTHROPIC_AUTH_TOKEN": "<their gateway key>" }
-     If the registry isn't an HTTPS URL on the gateway's host, add "TPT_REGISTRY_URL": "<registry URL>".
   That's it. Sessions on ticket branches are attributed automatically, including branch switches.
 `);
 }

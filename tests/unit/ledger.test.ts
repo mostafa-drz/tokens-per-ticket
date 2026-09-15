@@ -65,7 +65,7 @@ describe("fetchTagActivity", () => {
   it("fetches each day separately and follows its pages", async () => {
     const page = (date: string, spend: number, hasMore: boolean) => ({
       results: [{ date, metrics: { spend, api_requests: 1 }, breakdown: { entities: { "ticket:TPT-1": { metrics: { spend, api_requests: 1 } } } } }],
-      metadata: { has_more: hasMore, total_spend: 3 },
+      metadata: { has_more: hasMore },
     });
     const pages: Record<string, unknown[]> = {
       "2026-09-14": [page("2026-09-14", 1, true), page("2026-09-14", 2, false)],
@@ -101,24 +101,6 @@ describe("fetchTagActivity", () => {
     const [row] = summarizeTickets(days, contract);
     assert.equal(row.activeDays, 2);
     assert.equal(row.spend, 7);
-  });
-
-  it("refetches a day whose total moved between its pages, so no row counts twice", async () => {
-    let calls = 0;
-    const responses = [
-      // First pass: a row landed between page 1 and page 2.
-      { results: [{ date: "2026-09-14", metrics: { spend: 1 } }], metadata: { has_more: true, total_spend: 2 } },
-      { results: [{ date: "2026-09-14", metrics: { spend: 1 } }], metadata: { has_more: false, total_spend: 3 } },
-      // Second pass is stable.
-      { results: [{ date: "2026-09-14", metrics: { spend: 2 } }], metadata: { has_more: true, total_spend: 3 } },
-      { results: [{ date: "2026-09-14", metrics: { spend: 1 } }], metadata: { has_more: false, total_spend: 3 } },
-    ];
-    const days = await fetchTagActivity(
-      { startDate: "2026-09-14", endDate: "2026-09-14" },
-      { baseUrl: "http://gateway.test", apiKey: "sk-test", fetch: async () => Response.json(responses[calls++]) },
-    );
-    assert.equal(calls, 4);
-    assert.equal(days[0].metrics.spend, 3);
   });
 
   it("lists dates newest first and refuses more than a year", () => {

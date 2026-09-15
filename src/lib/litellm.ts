@@ -42,9 +42,8 @@ const ActivityPage = z.object({
     .object({
       page: z.number().default(1),
       has_more: z.boolean().default(false),
-      total_spend: z.number().default(0),
     })
-    .default({ page: 1, has_more: false, total_spend: 0 }),
+    .default({ page: 1, has_more: false }),
 });
 
 export type SpendMetrics = z.infer<typeof Metrics>;
@@ -80,12 +79,12 @@ export class LiteLLMError extends Error {
  * model, provider, endpoint...), and the all-tags query also returns every
  * User-Agent tag row. `page_size` has no upper bound in get_tag_daily_activity
  * (v1.100.1, tag_management_endpoints.py), and there is no aggregated tag
- * endpoint, so the client fetches one day at a time: each day stays a page or
- * two even for a few hundred engineers, days load in parallel, and finished
- * days are cached.
+ * endpoint, so the client fetches one day at a time: a day is one page even
+ * for a few hundred engineers, days load in parallel, and finished days are
+ * cached per server instance.
  */
-export const PAGE_SIZE = 1000;
-const PAGES_PER_DAY = 50;
+export const PAGE_SIZE = 10_000;
+const PAGES_PER_DAY = 20;
 const PARALLEL_DAYS = 6;
 
 /**
@@ -131,21 +130,16 @@ export async function fetchTagActivity(
 
 /**
  * One day, all pages. Pages are offsets over rows ordered by (date, id), so a
- * row inserted between two page requests would shift the offsets and repeat a
- * row. When a day spans several pages and its total moved meanwhile, fetch it
- * again.
+ * row inserted between two page requests could shift the offsets. Pages are
+ * large enough that a day is almost always a single request.
  */
 async function fetchDay(date: string, tags: string[] | undefined, config: LiteLLMConfig): Promise<DailySpend | null> {
-  for (let attempt = 1; ; attempt++) {
-    const pages: z.infer<typeof ActivityPage>[] = [];
-    for (let page = 1; ; page++) {
-      if (page > PAGES_PER_DAY) throw new LiteLLMError(`${date} has more than ${PAGES_PER_DAY * PAGE_SIZE} spend rows.`);
-      const parsed = await fetchPage(date, page, tags, config);
-      pages.push(parsed);
-      if (!parsed.metadata.has_more) break;
-    }
-    const moved = pages.length > 1 && pages[0].metadata.total_spend !== pages.at(-1)!.metadata.total_spend;
-    if (!moved || attempt === 3) return mergeDays(pages.flatMap((page) => page.results))[0] ?? null;
+  const results: DailySpend[] = [];
+  for (let page = 1; ; page++) {
+    if (page > PAGES_PER_DAY) throw new LiteLLMError(`${date} has more than ${PAGES_PER_DAY * PAGE_SIZE} spend rows.`);
+    const parsed = await fetchPage(date, page, tags, config);
+    results.push(...parsed.results);
+    if (!parsed.metadata.has_more) return mergeDays(results)[0] ?? null;
   }
 }
 
@@ -170,7 +164,7 @@ async function fetchPage(date: string, page: number, tags: string[] | undefined,
   if (!response.ok) {
     const hint =
       response.status === 401 || response.status === 403
-        ? " Check that the key can read spend routes (the master key or an admin key)."
+        ? " Use a key that can read spend routes, such as a proxy_admin_viewer key."
         : "";
     throw new LiteLLMError(`LiteLLM returned ${response.status} for /tag/daily/activity.${hint}`, response.status);
   }

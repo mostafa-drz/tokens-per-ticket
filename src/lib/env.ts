@@ -4,7 +4,7 @@ import path from "node:path";
 /**
  * Loads `.env.local` for the CLI scripts.
  *
- * `.env.local` is gitignored, so a worktree made by `pnpm ticket:start` never
+ * `.env.local` is gitignored, so a worktree made by `tpt start` never
  * has one. The scripts are meant to run inside those worktrees (the
  * /ticket-cost skill does exactly that), so after the current checkout's file
  * they also read the main checkout's.

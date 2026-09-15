@@ -58,8 +58,14 @@ export default async function LedgerPage({ searchParams }: PageProps<"/">) {
             <Figure label="Cache reads" value={formatPercent(cacheReadShare(total))} note="of input tokens" />
             <Figure
               label="Attributed"
-              value={claudeCode.spend > 0 ? formatPercent(Math.min(1, total.spend / claudeCode.spend)) : "—"}
-              note={claudeCode.spend > 0 ? `of ${formatUsd(claudeCode.spend)} Claude Code spend` : "no Claude Code tag in range"}
+              value={claudeCode.spend > 0 && total.spend <= claudeCode.spend ? formatPercent(total.spend / claudeCode.spend) : "—"}
+              note={
+                claudeCode.spend === 0
+                  ? "no Claude Code tag in range"
+                  : total.spend > claudeCode.spend
+                    ? "tickets include calls from other clients"
+                    : `of ${formatUsd(claudeCode.spend)} Claude Code spend`
+              }
             />
           </Figures>
 

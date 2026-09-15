@@ -61,8 +61,16 @@ export async function runReport(argv: string[]): Promise<void> {
   const branch = values.branch ?? currentBranch();
   const key = positionals[0]
     ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key.`))
-    : ((branch && findTicketKey(branch, contract)) ??
-      fail(`Branch "${branch ?? "(detached)"}" doesn't name a ticket. Pass a key: ${run("ENG-123")}`));
+    : ((branch && findTicketKey(branch, contract)) ?? noTicket());
+
+  function noTicket(): never {
+    // In CI (`--branch` from a merged PR), a branch like dependabot/... is normal.
+    if (values.branch) {
+      console.log(`Branch "${values.branch}" doesn't name a ticket. Nothing to report.`);
+      process.exit(0);
+    }
+    fail(`Branch "${branch ?? "(detached)"}" doesn't name a ticket. Pass a key: ${run("ENG-123")}`);
+  }
 
   // Check posting credentials before reading any spend.
   const poster = values.post ? reportPoster(contract.tracker) : null;

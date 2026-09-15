@@ -2,7 +2,7 @@ import { formatDay, formatPercent, formatTokens, formatUsd } from "./format.ts";
 import { cacheReadShare, type TicketDetail } from "./ledger.ts";
 
 /**
- * The ticket report as Markdown: printed by `pnpm ticket:report` and posted
+ * The ticket report as Markdown: printed by `tpt report` and posted
  * as a single, updated-in-place comment on the Linear ticket.
  */
 
