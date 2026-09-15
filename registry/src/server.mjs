@@ -5,9 +5,8 @@ import http from "node:http";
  * The session registry: which ticket each Claude Code session is working on.
  *
  * Writers are Claude Code hooks on developer machines. They authenticate with
- * the developer's own LiteLLM virtual key, sent only to a trusted registry URL
- * (the user's settings, or the gateway's own host, which receives that key on
- * every model call anyway). The registry keeps only sha256(key), the form
+ * the developer's own LiteLLM virtual key, so serve it over HTTPS. The
+ * registry keeps only sha256(key), the form
  * LiteLLM stores, accepts only active virtual keys, and gives a session to the
  * key that first reported it. The gateway plugin tags a call only when the
  * calling key owns the session, so a report can only attribute its own calls.
@@ -61,13 +60,7 @@ export function createServer({ store, internalToken, log = () => {}, limiter = r
         if (!sameSecret(bearer(req), internalToken)) return send(res, 401, { error: "Gateway token required." });
         const session = SESSION_ID.test(lookup[1]) ? await store.get(lookup[1]) : null;
         if (!session) return send(res, 404, { error: "Unknown session." });
-        return send(res, 200, {
-          ticket: session.ticket,
-          key_token: session.key_token,
-          branch: session.branch,
-          repo: session.repo,
-          updated_at: session.updated_at,
-        });
+        return send(res, 200, { ticket: session.ticket, key_token: session.key_token });
       }
 
       send(res, 404, { error: "Not found." });

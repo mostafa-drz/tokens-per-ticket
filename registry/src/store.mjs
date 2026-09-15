@@ -1,7 +1,7 @@
 /**
  * Storage for the registry: the current ticket per Claude Code session, in
- * LiteLLM's own Postgres, which also lets the registry check keys against
- * LiteLLM's key table.
+ * LiteLLM's Postgres (its own schema), which also lets the registry check keys
+ * against LiteLLM's key table.
  */
 
 export function memoryStore({ tokens = null } = {}) {
@@ -24,17 +24,42 @@ export function memoryStore({ tokens = null } = {}) {
   };
 }
 
-export async function postgresStore(pool, { retentionDays = 90, cacheMs = 60_000 } = {}) {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS tpt_sessions (
+/**
+ * The registry's table lives in its own schema, never in LiteLLM's "public":
+ * on upgrade, LiteLLM diffs "public" against its Prisma schema and applies the
+ * result, which drops tables it doesn't know
+ * (litellm_proxy_extras/utils.py, _resolve_all_migrations, v1.100.1).
+ */
+export async function postgresStore(pool, { schema = "tpt", retentionDays = 90, cacheMs = 60_000 } = {}) {
+  if (!/^[a-z_][a-z0-9_]*$/.test(schema)) throw new Error(`Invalid schema name: ${schema}`);
+  const TABLE = `${schema}.sessions`;
+  const DDL = `
+    CREATE SCHEMA IF NOT EXISTS ${schema};
+    CREATE TABLE IF NOT EXISTS ${TABLE} (
       session_id text PRIMARY KEY,
       ticket     text,
-      branch     text,
-      repo       text,
       key_token  text NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now()
     );
-  `);
+  `;
+
+  // DDL only when the table is missing, so a role without CREATE can run an
+  // already set up registry.
+  async function ensureTable() {
+    const { rows } = await pool.query(`SELECT to_regclass('${TABLE}') AS t`);
+    if (!rows[0].t) await pool.query(DDL);
+  }
+  // If the table disappears anyway, recreate it and retry once.
+  async function query(text, values) {
+    try {
+      return await pool.query(text, values);
+    } catch (error) {
+      if (error?.code !== "42P01") throw error;
+      await ensureTable();
+      return pool.query(text, values);
+    }
+  }
+  await ensureTable();
 
   const tokenCache = new Map();
 
@@ -58,28 +83,25 @@ export async function postgresStore(pool, { retentionDays = 90, cacheMs = 60_000
       return active;
     },
     async get(sessionId) {
-      const { rows } = await pool.query(
-        "SELECT session_id, ticket, branch, repo, key_token, updated_at FROM tpt_sessions WHERE session_id = $1",
-        [sessionId],
-      );
+      const { rows } = await query(`SELECT session_id, ticket, key_token, updated_at FROM ${TABLE} WHERE session_id = $1`, [sessionId]);
       return rows[0] ?? null;
     },
     /** Upserts the session; false when another key already owns it. */
     async put(r) {
-      const { rowCount } = await pool.query(
-        `INSERT INTO tpt_sessions (session_id, ticket, branch, repo, key_token, updated_at)
-         VALUES ($1, $2, $3, $4, $5, now())
+      const { rowCount } = await query(
+        `INSERT INTO ${TABLE} AS s (session_id, ticket, key_token, updated_at)
+         VALUES ($1, $2, $3, now())
          ON CONFLICT (session_id) DO UPDATE
-           SET ticket = EXCLUDED.ticket, branch = EXCLUDED.branch, repo = EXCLUDED.repo, updated_at = now()
-         WHERE tpt_sessions.key_token = EXCLUDED.key_token
+           SET ticket = EXCLUDED.ticket, updated_at = now()
+         WHERE s.key_token = EXCLUDED.key_token
          RETURNING session_id`,
-        [r.session_id, r.ticket, r.branch, r.repo, r.key_token],
+        [r.session_id, r.ticket, r.key_token],
       );
       return rowCount > 0;
     },
     /** Deletes sessions not updated within the retention window. */
     async prune() {
-      await pool.query(`DELETE FROM tpt_sessions WHERE updated_at < now() - make_interval(days => $1)`, [retentionDays]);
+      await query(`DELETE FROM ${TABLE} WHERE updated_at < now() - make_interval(days => $1)`, [retentionDays]);
     },
   };
   await store.prune();

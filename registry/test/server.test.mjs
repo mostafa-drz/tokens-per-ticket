@@ -31,7 +31,7 @@ describe("registry", () => {
     const res = await lookup("s-1");
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.deepEqual({ ...body, updated_at: undefined }, { ticket: "ENG-1", key_token: sha("sk-jane"), branch: "jane/eng-1", repo: null, updated_at: undefined });
+    assert.deepEqual(body, { ticket: "ENG-1", key_token: sha("sk-jane") });
     assert.ok(!JSON.stringify([...store.sessions.values()]).includes("sk-jane"));
   });
 

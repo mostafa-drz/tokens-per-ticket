@@ -27,11 +27,12 @@ describe("postgres store", { skip: !url && "set TPT_TEST_DATABASE_URL to run" },
 
   after(async () => {
     await pool?.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await pool?.query(`DROP SCHEMA IF EXISTS ${schema}_reg CASCADE`);
     await pool?.end();
   });
 
   it("accepts only active keys and keeps a session with the key that reported it", async () => {
-    const store = await postgresStore(pool);
+    const store = await postgresStore(pool, { schema: `${schema}_reg` });
     assert.equal(await store.isActiveToken(sha("sk-jane")), true);
     assert.equal(await store.isActiveToken(sha("sk-blocked")), false);
     assert.equal(await store.isActiveToken(sha("sk-expired")), false);
@@ -40,5 +41,12 @@ describe("postgres store", { skip: !url && "set TPT_TEST_DATABASE_URL to run" },
     assert.equal(await store.put({ ...report, key_token: sha("sk-jane") }), true);
     assert.equal(await store.put({ ...report, ticket: "ENG-9", key_token: sha("sk-other") }), false);
     assert.equal((await store.get("s1")).ticket, "ENG-1");
+  });
+
+  it("recreates its table if something drops it (a LiteLLM upgrade diffing its schema)", async () => {
+    const store = await postgresStore(pool, { schema: `${schema}_reg` });
+    await pool.query(`DROP TABLE ${schema}_reg.sessions`);
+    assert.equal(await store.put({ session_id: "s2", ticket: "ENG-2", key_token: sha("sk-jane") }), true);
+    assert.equal((await store.get("s2")).ticket, "ENG-2");
   });
 });

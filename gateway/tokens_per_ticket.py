@@ -169,7 +169,9 @@ class SessionTicketTagger(CustomLogger):
                 self._skip_until = now + self.backoff_seconds
                 self._failures = 0
             raise
-        if response.status_code >= 500:
+        # 404 is "unknown session". Anything else (a wrong TPT_REGISTRY_TOKEN
+        # answers 401) is a registry problem: log it and back off.
+        if response.status_code not in (200, 404):
             self._failures += 1
             if self._failures >= self.failures_before_backoff:
                 self._skip_until = now + self.backoff_seconds
