@@ -4,8 +4,8 @@
 # This is the one file a team edits to adopt it. The code reads it; nothing
 # about Linear, team keys, or branch shape is hard-coded.
 
-# Where `ticket:report --post` writes. Only "linear" is supported; set
-# anything else (e.g. jira) and --post refuses instead of querying Linear.
+# Where `report --post` writes: "linear" or "jira" (Jira Cloud). Anything
+# else: run the report without --post and paste it into your tracker.
 tracker: linear
 
 key:

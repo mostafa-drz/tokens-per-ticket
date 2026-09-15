@@ -97,7 +97,7 @@ pnpm dev                                  # the ledger on :3000 (sample data)
 
 To see your gateway's numbers in the ledger instead of sample data, set `LEDGER_DATA=litellm` in `.env.local` and restart `pnpm dev`.
 
-The smoke test uses `mock-ticket-model`, defined in `gateway/litellm.config.yaml`. It returns a canned answer but still gets tokens counted and priced, so the whole loop runs without an Anthropic key.
+The smoke test runs the automatic path the way Claude Code and the hooks do. It creates a temporary virtual key, reports two sessions to the registry, and calls `mock-ticket-model` with only the session id. Then it checks that the gateway attributed the spend to each session's ticket. The mock model returns a canned answer but still gets tokens counted and priced, so the whole loop runs without an Anthropic key.
 
 ---
 
@@ -109,7 +109,7 @@ Locally, `pnpm gateway:up` runs all three. For a team, deploy LiteLLM with Postg
 
 Automatic attribution needs two more things next to LiteLLM:
 
-- **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it the same Postgres (`DATABASE_URL`; it creates its own `tpt_*` tables) and a shared secret `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS, ideally on the gateway's host; the gateway plugin calls it on the internal network.
+- **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it **LiteLLM's own Postgres** (`DATABASE_URL`): it creates its own `tpt_*` tables and reads LiteLLM's key table, so it only accepts sessions from active virtual keys. Also give it a shared secret, `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS, ideally on the gateway's host; the gateway plugin calls it on the internal network.
 - **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout. After a registry error it skips lookups for 15 seconds, so an outage costs attribution, not latency. The only calls it refuses are ones that set their own `ticket:` tag.
 
 If you already run LiteLLM for your product, you can point development traffic at the same gateway, but check three things first:
@@ -176,11 +176,11 @@ Each developer adds this to `~/.claude/settings.json` ([Claude Code LLM gateway 
 }
 ```
 
-While a gateway credential is active, Claude Code bills per token to whoever owns the provider key behind the gateway, not to the developer's claude.ai subscription. If your team keeps subscriptions, LiteLLM documents a [Max subscription setup](https://docs.litellm.ai/docs/tutorials/claude_code_max_subscription): tokens are still counted per ticket, but they aren't billed per token.
+While a gateway credential is active, Claude Code bills per token to whoever owns the provider key behind the gateway, not to the developer's claude.ai subscription. If your team keeps subscriptions, follow LiteLLM's [Max subscription setup](https://docs.litellm.ai/docs/tutorials/claude_code_max_subscription), which passes the virtual key as `x-litellm-api-key` in `ANTHROPIC_CUSTOM_HEADERS`. The hook reads it from there, so tokens are still counted per ticket, but they aren't billed per token.
 
 If the registry isn't on the gateway's host, also set `"TPT_REGISTRY_URL": "https://…"` here: a registry URL from the repository is only trusted on the gateway's host (see [decisions](#decisions-limits-and-gotchas)).
 
-That's the only per-person step, and it isn't even that with [managed settings](https://code.claude.com/docs/en/managed-settings): an admin can deliver `ANTHROPIC_BASE_URL` and `TPT_REGISTRY_URL` to every machine, leaving each engineer only their key. The hook needs the key in `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` to compute its fingerprint; with an `apiKeyHelper`, it can't report sessions.
+That's the only per-person step, and it isn't even that with [managed settings](https://code.claude.com/docs/en/managed-settings): an admin can deliver `ANTHROPIC_BASE_URL` and `TPT_REGISTRY_URL` to every machine, leaving each engineer only their key. The hook finds the key in `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `x-litellm-api-key` in `ANTHROPIC_CUSTOM_HEADERS`. With an `apiKeyHelper` it can't, and those sessions aren't attributed.
 
 ### 4. Set up each repository, once
 
@@ -234,7 +234,7 @@ To work two tickets side by side, `tpt start` gives each one its own worktree an
 node .tokens-per-ticket/tpt.mjs start ENG-124 "retry on 429"   # or /ticket-start, or pnpm ticket:start here
 ```
 
-It names the branch from the contract, creates the worktree next to the repo without touching your checkout, and launches `claude` there named `ENG-124`. With the registry on, the worktree's branch attributes the session like any other. Without a registry, it passes an explicit `x-litellm-tags: ticket:ENG-124` header instead. Use `--print` to get the command instead of launching, and `--base origin/main` to choose where the branch starts.
+It names the branch from the contract, creates the worktree next to the repo without touching your checkout, and launches `claude` there named `ENG-124`. The worktree's branch attributes the session like any other. Use `--print` to get the command instead of launching, and `--base origin/main` to choose where the branch starts.
 
 ---
 
@@ -261,7 +261,7 @@ automation:
 
 Branches are parsed **by the template**, not by searching for something that looks like a key. A loose search reads `dependabot/npm_and_yarn/next-16` as ticket `NEXT-16`. With the template, branches outside the contract (`main`, spikes, bots) are simply unattributed. That's the honest answer.
 
-`{key}` writes the key lowercased, as Linear does. `{KEY}` keeps it as the tracker prints it. Using Jira with `feature/PROJ-42_login`? Set `template: "feature/{KEY}_{slug}"`: Jira only [links branches whose key is uppercase](https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/), and on a case-insensitive file system (macOS) a lowercased `feature/proj-42_login` collides with an existing `feature/PROJ-42_login`. Parsing is case-insensitive either way, so hand-typed branches still count. `ticket:report --post` only writes to Linear; see [step 6](#6-see-what-it-cost).
+`{key}` writes the key lowercased, as Linear does. `{KEY}` keeps it as the tracker prints it. Using Jira with `feature/PROJ-42_login`? Set `template: "feature/{KEY}_{slug}"`: Jira only [links branches whose key is uppercase](https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/), and on a case-insensitive file system (macOS) a lowercased `feature/proj-42_login` collides with an existing `feature/PROJ-42_login`. Parsing is case-insensitive either way, so hand-typed branches still count. `report --post` writes to Linear or Jira; see [step 6](#6-see-what-it-cost).
 
 A `teams` allowlist also filters the ledger, `ticket:report`, and the hook: tags for other teams are ignored. That includes the sample data (`TPT-*`) and `ticket:report SMOKE-1`, so try the five-minute loop before you set it.
 
@@ -269,7 +269,7 @@ A `teams` allowlist also filters the ledger, `ticket:report`, and the hook: tags
 
 ## The ledger app and Vercel
 
-The ledger is a Next.js 16 app with two pages: every ticket in a date range, and one ticket's spend per day, split by model. The ticket page previews exactly what `--post` writes to Linear.
+The ledger is a Next.js 16 app with two pages: every ticket in a date range, and one ticket's spend per day, split by model. The ticket page previews exactly what `--post` writes to the ticket.
 
 It has one AI feature, **Review spend**. A model reads a ticket's numbers and points out what's worth a conversation. That call goes through the same gateway, tagged `app:ledger`, so the app's own runtime tokens never count toward any ticket.
 
@@ -311,29 +311,31 @@ Everything lives in the repo and is committed, so the whole team gets it:
 
 ## Decisions, limits, and gotchas
 
-- **Why a registry.** Claude Code has no way to change API request headers during a session. The only header helpers are for OpenTelemetry and plugin downloads ([settings](https://code.claude.com/docs/en/settings)). A session-to-ticket map read by the gateway is the smallest thing that follows branch switches.
-- **No key leaves the laptop through the hook.** Hooks send `sha256(sha256(key))`, not the key. LiteLLM stores a key as `sha256(key)` and rejects that hash as a credential; the extra round gives a fingerprint the plugin can recompute from the calling key's stored hash, and that works nowhere as a credential. A session belongs to the first fingerprint that reports it, and the plugin only tags calls from the matching key, so a report can only ever attribute the reporter's own calls. Only the gateway, with `TPT_REGISTRY_TOKEN`, can read sessions.
-- **The registry URL comes from trusted config.** `TPT_REGISTRY_URL` belongs in the user's or the organization's Claude Code settings. The repo's `automation.registry_url` is a default a branch could change, so it's used only when it's on the same host as the user's own `ANTHROPIC_BASE_URL`, and ignored with a warning otherwise.
-- **Which code the hooks run.** Neither the Claude Code hooks nor the git hook run the checkout's `.tokens-per-ticket/tpt.mjs` once a clone is set up. They run a copy in the git directory (`.git/tokens-per-ticket/tpt.mjs`), so a branch that swaps the bundle changes nothing that runs.
-  - **Creation.** The copy is made the first time a hook runs in a clone, from the branch that clone started on.
-  - **Updates.** Only an explicit `tpt init` replaces it.
-  - **A different bundle on a branch.** The session hook says so and keeps using the copy.
-  - **What this doesn't cover.** `.claude/settings.json` is committed too, so a branch can still change the hook *commands* themselves. That is [Claude Code's trust model](https://code.claude.com/docs/en/permissions) for any project hook: review changes to `.claude/` like any other code.
-- **When tags can be wrong for a moment.**
-  - The plugin caches a session for 2 seconds.
-  - A `FileChanged` event can arrive a moment after the call that followed the switch.
-  - A registry outage, a timeout, or a missing key means untagged spend, never a failed call. The *Attributed* figure in the ledger shows the gap.
-- **Only the gateway sets tickets.** With the plugin on, a request that sets its own `ticket:` tag (in `x-litellm-tags` or the body) is refused with a clear 400, so a key can't charge its spend to someone else's ticket. Other tags pass through. The plugin writes the ticket both to the request and to the metadata copy LiteLLM's spend logging reads, which on `/v1/messages` is taken before plugins run (checked on `v1.100.1`).
-- **Subagents keep their own ticket.** Subagents share their session's id, so hooks that fire inside a subagent report for that subagent (`agent_id`), and the plugin looks up `x-claude-code-agent-id` first. A subagent working in another worktree doesn't move the main session's spend.
-- **Unattributed spend is visible.** The ledger's *Attributed* figure compares ticket spend with all Claude Code spend, taken from the `User-Agent: claude-cli` tag LiteLLM adds to every Claude Code call. Work on `main`, or from a session that isn't connected to the registry, shows up as the gap.
-- **Tag budgets don't see automatic tags.** LiteLLM checks tag budgets during auth, before the plugin adds the tag. Spend tracking is unaffected. Budgets per key and per team work as usual, and `x-litellm-tags` headers are merged before that check ([tag budgets](https://docs.litellm.ai/docs/proxy/tag_budgets)).
-- **Scope: Claude Code behind LiteLLM, on purpose.** That's where per-request session ids and a pluggable gateway exist today. Other tools (Cursor, Codex) and other gateways (Claude apps gateway, Portkey) aren't attributed. The hooks' session timeline in `tpt_session_events` is gateway-agnostic, so an adapter that joins it with another gateway's logs or Claude Code's OpenTelemetry `session.id` is the natural extension.
-- **Spend is written in batches.** Calls from the last minute or so may not show yet.
-- **LiteLLM adds its own tags.** Every request is also tagged with its `User-Agent`, so one request appears under several tags. The ledger reads per-tag breakdowns and never adds a day's totals across tags, to avoid counting the same request twice.
-- **"Input tokens" include cache reads and writes.** LiteLLM folds Anthropic's cache tokens into `prompt_tokens`, so the cache share is cache reads ÷ input tokens.
-- **Development tokens only.** The ledger tracks what building a ticket cost. The app's own review calls are tagged `app:ledger` and stay out of it.
-- **The gateway image is pinned** to `v1.100.1`, the version this repo was verified against. LiteLLM recommends pinned tags so rollbacks are deterministic.
-- **The mock model is only priced on `/v1/chat/completions`.** LiteLLM's `/v1/messages` mock path returns synthetic usage with no cost, which is why the smoke test uses the OpenAI-format endpoint.
+**How attribution works, and why this way**
+
+- **Why a registry.** Claude Code can't change API request headers during a session; its only header helpers are for OpenTelemetry and plugin downloads ([settings](https://code.claude.com/docs/en/settings)). A session-to-ticket map the gateway reads is the smallest thing that follows branch switches.
+- **Subagents count toward their session.** They share its session id. Claude Code passes `agent_id` to hooks only on tool events, so a subagent working in another worktree is still billed to the session's ticket.
+- **Scope: Claude Code behind LiteLLM, on purpose.** That's where per-request session ids and a pluggable gateway exist today. Other tools (Cursor, Codex) and other gateways (Claude apps gateway, Portkey) aren't attributed. The session timeline in `tpt_session_events` doesn't depend on the gateway, so an adapter that joins it with another gateway's logs, or with Claude Code's OpenTelemetry `session.id`, is the natural extension.
+
+**Who can attribute what**
+
+- **Only the gateway sets tickets.** With the plugin on, a request that sets its own `ticket:` tag (in `x-litellm-tags` or the body) gets a clear 400, and so do pass-through routes such as `/anthropic/*`, where tags can't be checked (`TPT_ALLOW_PASS_THROUGH=true` if a shared gateway needs them). Developer keys with `allowed_routes: ["anthropic_routes"]` can't reach pass-through at all. LiteLLM's spend logging reads a copy of the request metadata taken before plugins run, so the plugin writes the ticket there too (checked on `v1.100.1`).
+- **No key leaves the laptop through the hook.** Hooks send `sha256(sha256(key))`. LiteLLM stores a key as `sha256(key)` and refuses that hash as a credential, so the fingerprint works nowhere as one. The registry accepts reports only for active LiteLLM virtual keys, a session belongs to the key that first reported it, and the plugin only tags calls from that key. A report can only ever attribute the reporter's own calls. The master key isn't a virtual key, so its sessions aren't attributed and the hook says so.
+- **The registry URL comes from trusted config.** `TPT_REGISTRY_URL` belongs in the user's or the organization's Claude Code settings. A repo's `automation.registry_url` is only used on the same host as the user's own `ANTHROPIC_BASE_URL`.
+- **Which code the hooks run.** Once a clone is set up, the Claude Code hooks and the git hook run a copy of the CLI in `.git/tokens-per-ticket/`, not the checkout's `.tokens-per-ticket/tpt.mjs`. A branch that swaps the bundle changes nothing that runs; only an explicit `tpt init` replaces the copy, and the session hook reports when a branch carries a different one. A branch can still change `.claude/settings.json` itself, which is [Claude Code's trust model](https://code.claude.com/docs/en/permissions) for any project hook: review changes to `.claude/` like any other code.
+
+**Accuracy**
+
+- **Unattributed spend is visible.** The ledger's *Attributed* figure compares ticket spend with all Claude Code spend, from the `User-Agent: claude-cli` tag LiteLLM adds to every Claude Code call.
+  - **What the gap covers:** work on `main`, sessions without a registry connection, or a registry that couldn't be reached.
+  - **Registry trouble never fails a call.** After three failed lookups in a row, the plugin pauses new lookups for 15 seconds and keeps tagging sessions it already knows.
+- **Tags can lag a switch by a moment.** Sessions are cached for 2 seconds, and a `FileChanged` event can arrive just after the call that followed the switch. LiteLLM also writes spend in batches, so the last minute may not show yet.
+- **No double counting.** Every request also carries LiteLLM's `User-Agent` tags, so the ledger reads per-tag breakdowns and never adds a day's totals across tags.
+- **Input tokens include cache reads and writes**, as LiteLLM folds them into `prompt_tokens`. The cache share is cache reads ÷ input tokens.
+- **Costs are LiteLLM's price-map estimates**, not your invoice.
+- **Development tokens only.** The ledger's own review calls are tagged `app:ledger`.
+- **Tag budgets don't see automatic tags.** LiteLLM checks them during auth, before the plugin runs. Key and team budgets work as usual.
+- **Pinned to LiteLLM `v1.100.1`**, the version verified here. The plugin relies on how that version handles request metadata, so re-run `pnpm gateway:smoke` after upgrading.
 
 ---
 
@@ -342,7 +344,7 @@ Everything lives in the repo and is committed, so the whole team gets it:
 ```bash
 pnpm dev             # ledger on :3000
 pnpm test:unit       # node:test via tsx, including responses recorded from a real gateway
-pnpm test:registry   # the session registry (set TPT_TEST_DATABASE_URL to include the Postgres migration test)
+pnpm test:registry   # the session registry (set TPT_TEST_DATABASE_URL to include the Postgres test)
 pnpm test:gateway    # the LiteLLM plugin (Python, no LiteLLM needed)
 pnpm test:e2e        # Playwright on :3100, desktop + phone, sample data
 pnpm build:cli       # rebuild .tokens-per-ticket/tpt.mjs after changing src/cli or src/lib
