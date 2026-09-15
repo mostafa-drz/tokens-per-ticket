@@ -90,7 +90,7 @@ export default async function TicketPage({ params, searchParams }: PageProps<"/t
 
           <section className="flex flex-col gap-3">
             <h2 className="text-sm font-medium text-ink-soft">
-              What <code className="num text-ink">pnpm ticket:report {key} --post</code> writes on the Linear ticket
+              What <code className="num text-ink">tpt report {key} --post</code> writes on the ticket
             </h2>
             <pre className="num overflow-x-auto rounded-lg border border-rule bg-sheet p-4 text-xs leading-relaxed whitespace-pre">
               {renderReport({ detail, tag, range, generatedAt: new Date() })}

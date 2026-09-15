@@ -22,8 +22,9 @@ export async function runReport(argv: string[]): Promise<void> {
   const manager = detectPackageManager(tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd());
   const run = (...args: string[]) => command(manager, "ticket:report", args);
 
-  const USAGE = `Usage: ${run("[TICKET-KEY]", "[--days <n>]", "[--post]")}
+  const USAGE = `Usage: ${run("[TICKET-KEY | --branch <name>]", "[--days <n>]", "[--post]")}
 
+    --branch <name>  Read the ticket from this branch name instead (e.g. a merged PR's branch in CI)
     --days <n>   Look back this many days, today included (default 30)
     --post       Create or update the report comment on the ticket (Linear or Jira)
 
@@ -36,7 +37,7 @@ export async function runReport(argv: string[]): Promise<void> {
 
   // npm keeps flags written before `--` for itself: `npm run ticket:report
   // ENG-1 --post` would print the report, skip Linear, and exit 0.
-  const taken = flagsTakenByNpm(["post", "days", "help"]);
+  const taken = flagsTakenByNpm(["post", "days", "branch", "help"]);
   if (taken.length) {
     fail(`npm kept ${taken.map((flag) => `--${flag}`).join(", ")} for itself. Put the arguments after --:\n  ${run("ENG-123", `--${taken[0]}`)}`);
   }
@@ -46,6 +47,7 @@ export async function runReport(argv: string[]): Promise<void> {
     allowPositionals: true,
     options: {
       days: { type: "string", default: "30" },
+      branch: { type: "string" },
       post: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -64,7 +66,7 @@ export async function runReport(argv: string[]): Promise<void> {
   // Ticket worktrees have no .env.local of their own (it's gitignored).
   loadEnvLocal([tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd(), mainRoot]);
   const contract = loadContract(mainRoot);
-  const branch = currentBranch();
+  const branch = values.branch ?? currentBranch();
   const key = positionals[0]
     ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key.`))
     : ((branch && findTicketKey(branch, contract)) ??
@@ -77,7 +79,15 @@ export async function runReport(argv: string[]): Promise<void> {
   const days = Number.parseInt(values.days, 10);
   if (!Number.isInteger(days) || days < 1) fail("--days must be a positive whole number.");
 
-  const apiKey = process.env.LITELLM_API_KEY || fail("Set LITELLM_API_KEY in .env.local (see .env.example).");
+  const apiKey = process.env.LITELLM_API_KEY;
+  if (!apiKey) {
+    const ledger = contract.automation.ledger_url;
+    if (ledger && !values.post) {
+      console.log(`\n${key}'s spend is in the ledger: ${new URL(`/tickets/${encodeURIComponent(key)}`, ledger)}\n`);
+      process.exit(0);
+    }
+    fail("Set LITELLM_API_KEY in .env.local (see .env.example). It reads the whole organization's spend, so it belongs in CI or with a lead, not on every laptop.");
+  }
   const baseUrl = process.env.LITELLM_BASE_URL || "http://localhost:4000";
 
   const tag = ticketTag(key, contract);

@@ -46,3 +46,6 @@ automation:
   # Adds "Ticket: ENG-123" to commit messages on ticket branches, so a commit
   # or PR can be traced back to its ticket. Set to false to turn off.
   commit_trailer: "Ticket"
+  # Your deployed ledger. Engineers without the spend-reading key get this link
+  # from `tpt report` and /ticket-cost instead of an error.
+  # ledger_url: "https://tokens.your-company.dev"

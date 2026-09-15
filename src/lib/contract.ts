@@ -42,6 +42,9 @@ const ContractSchema = z.object({
       registry_url: z.string().url().optional(),
       // Git trailer added to commits on ticket branches, or false for none.
       commit_trailer: z.union([z.string().regex(/^[A-Za-z][A-Za-z0-9-]*$/), z.literal(false)]).default("Ticket"),
+      // Where engineers read spend. `tpt report` and /ticket-cost point here when
+      // the machine has no spend-reading key (which belongs in CI, not on laptops).
+      ledger_url: z.string().url().optional(),
     })
     .prefault({}),
 });

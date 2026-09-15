@@ -220,7 +220,30 @@ node .tokens-per-ticket/tpt.mjs report                  # the current branch's t
 node .tokens-per-ticket/tpt.mjs report ENG-123 --post   # also create or update the comment on the ticket
 ```
 
-In this repo, `pnpm ticket:report` does the same. The report reads `LITELLM_BASE_URL` and `LITELLM_API_KEY` from `.env.local` (see `.env.example`), and `LINEAR_API_KEY` for `--post`. That key reads the whole organization's spend (see [step 2](#2-give-each-developer-a-key)), so don't copy it to every laptop. Run `report --post` from one place that holds it, such as a CI job at PR time, and let engineers use the ledger.
+In this repo, `pnpm ticket:report` does the same. The report reads `LITELLM_BASE_URL` and `LITELLM_API_KEY` from `.env.local` (see `.env.example`). That key reads the whole organization's spend (see [step 2](#2-give-each-developer-a-key)), so don't copy it to every laptop. Set `automation.ledger_url` in `tokens-per-ticket.yaml` instead: engineers without the key get a link to the ticket in the ledger.
+
+Post reports from one place that holds the key, such as CI. For example, when a PR is merged:
+
+```yaml
+# .github/workflows/ticket-report.yml
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  report:
+    if: github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node .tokens-per-ticket/tpt.mjs report --branch "$BRANCH" --days 90 --post
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_SPEND_READER_KEY }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+```
+
+`--branch` reads the ticket from the PR's branch name using the contract, the same way the hooks do.
 
 `--post` writes to the tracker named in `tokens-per-ticket.yaml`: `tracker: linear` (needs `LINEAR_API_KEY`) or `tracker: jira` (Jira Cloud, needs `JIRA_BASE_URL`, `JIRA_EMAIL`, and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens) in `JIRA_API_TOKEN`). It keeps exactly one report comment per ticket, written by that account and updated on every run, and never edits anyone else's comment. For other trackers, run the report without `--post` and paste it in.
 

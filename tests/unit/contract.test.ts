@@ -158,6 +158,7 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
       registry_url: "http://localhost:4100",
       commit_trailer: "Ticket",
     });
+    assert.equal(parseContract(`${base}\nautomation: { ledger_url: "https://tokens.acme.dev" }`).automation.ledger_url, "https://tokens.acme.dev");
   });
 
   it("rejects a trailer name git would not accept", () => {

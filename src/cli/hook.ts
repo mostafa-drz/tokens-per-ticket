@@ -154,7 +154,9 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const billedTo = automatic ? ticket : null;
   const context = billedTo
     ? `tokens-per-ticket: model calls in this session count toward ticket ${billedTo}, following the current branch automatically.`
-    : `tokens-per-ticket: branch "${branch ?? "(detached)"}" doesn't name a ticket, so this session's spend isn't attributed to one.`;
+    : ticket
+      ? `tokens-per-ticket: this session's spend isn't attributed to ${ticket} yet; see the tokens-per-ticket warning for what's missing.`
+      : `tokens-per-ticket: branch "${branch ?? "(detached)"}" doesn't name a ticket, so this session's spend isn't attributed to one.`;
 
   if (event === "UserPromptSubmit") {
     return problems.length && reported === "failed" ? { systemMessage: `tokens-per-ticket: ${problems.join(" ")}` } : {};

@@ -33,8 +33,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </header>
           {children}
           <footer className="border-t border-rule pt-4 text-xs text-ink-soft">
-            Spend comes from LiteLLM&apos;s daily tag totals. A ticket&apos;s tag is set when its Claude Code session
-            starts. See the README for how it fits together.
+            Spend comes from LiteLLM&apos;s daily tag totals. Each Claude Code call is tagged with the ticket of the
+            session&apos;s current branch. See the README for how it fits together.
           </footer>
         </div>
       </body>
