@@ -323,11 +323,11 @@ function firstLine(error: unknown): string {
 
 /**
  * Claude Code settings entries for the hook, merged by `init`. Runs the
- * checkout's committed CLI; on a branch from before adoption, which has none,
+ * committed CLI at the checkout's root (the project dir may be a subfolder); on a branch from before adoption, which has none,
  * the copy kept next to the session state. Claude Code exports
  * CLAUDE_PROJECT_DIR to hook processes. https://code.claude.com/docs/en/hooks
  */
-export const HOOK_COMMAND = `f="$CLAUDE_PROJECT_DIR/${BUNDLE_PATH}"; [ -f "$f" ] || f="\${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs"; [ -f "$f" ] || exit 0; node "$f" hook`;
+export const HOOK_COMMAND = `r="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null)" || r="$CLAUDE_PROJECT_DIR"; f="$r/${BUNDLE_PATH}"; [ -f "$f" ] || f="\${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs"; [ -f "$f" ] || exit 0; node "$f" hook`;
 
 export function hookSettings(): Record<string, unknown[]> {
   const handler = { type: "command", command: HOOK_COMMAND };

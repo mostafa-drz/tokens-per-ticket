@@ -70,6 +70,7 @@ export async function runInit(argv: string[]): Promise<void> {
     done.push(`kept your ${CONTRACT_FILE}${registryUrl || teams.length ? " (edit it directly; --registry-url and --teams only apply to a new file)" : ""}`);
   } else {
     let config = defaultConfig();
+    if (!registryUrl) done.push("⚠ automation.registry_url is http://localhost:4100, which only works on the gateway's own machine. Pass --registry-url, or set TPT_REGISTRY_URL for everyone through managed settings");
     if (registryUrl) config = config.replace(/registry_url: ".*"/, `registry_url: "${registryUrl}"`);
     if (teams.length) config = config.replace(/teams: \[\]/, `teams: [${teams.join(", ")}]`);
     writeFileSync(configFile, config);

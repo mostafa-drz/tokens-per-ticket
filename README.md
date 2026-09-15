@@ -207,7 +207,7 @@ Commit the files: every clone and worktree needs them.
 
 ### 5. Work as usual
 
-Check out a ticket branch, with Linear's "Copy git branch name" or any tool, and start `claude`. That's all:
+Check out a ticket branch, with Linear's "Copy git branch name" or any tool, and start `claude` at the repository root (Claude Code reads `.claude/settings.json` from the directory you start it in, so a session started in a monorepo subfolder runs no hooks; checked with Claude Code 2.1.271). That's all:
 
 - **Session start.** The hook reports the session's ticket, names the session `ENG-123`, and tells Claude which ticket its work counts toward.
 - **Branch switch.** Switching with `git switch`, from Claude's Bash, or from your IDE fires a `FileChanged` event on `.git/HEAD` ([hooks](https://code.claude.com/docs/en/hooks)). The session's next calls count toward the new ticket, and you see a one-line note.
@@ -352,7 +352,7 @@ Everything lives in the repo and is committed, so the whole team gets it:
 **Accuracy**
 
 - **Unattributed Claude Code spend is visible.** The ledger's *Attributed* figure compares ticket spend with Claude Code spend, from the `User-Agent: claude-cli` tag LiteLLM adds to every Claude Code call. That tag comes from the client, so spend from other clients, or a changed User-Agent, is in neither figure: for a full picture, compare with per-key spend in LiteLLM's own UI.
-  - **What the gap covers:** work on `main`, sessions without a registry connection, or a registry that couldn't be reached.
+  - **What the gap covers:** work on `main`, sessions started in a subfolder instead of the repository root, sessions without a registry connection, or a registry that couldn't be reached.
   - **Registry trouble never fails a call.** After three failed lookups in a row, the plugin pauses new lookups for 15 seconds and keeps tagging sessions it already knows.
 - **Tags can lag a switch by a moment.** Sessions are cached for 2 seconds, and a `FileChanged` event can arrive just after the call that followed the switch. LiteLLM also writes spend in batches, so the last minute may not show yet.
 - **No double counting.** Every request also carries LiteLLM's `User-Agent` tags, so the ledger reads per-tag breakdowns and never adds a day's totals across tags.
