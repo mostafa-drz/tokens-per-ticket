@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
 import { createHash } from "node:crypto";
+import { after, before, describe, it } from "node:test";
 import { createServer, parseReport, rateLimiter } from "../src/server.mjs";
 import { memoryStore } from "../src/store.mjs";
 
@@ -8,9 +8,10 @@ import { memoryStore } from "../src/store.mjs";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const JANE = sha(sha("sk-jane"));
 const OMAR = sha(sha("sk-omar"));
+const UNKNOWN = sha(sha("sk-not-a-litellm-key"));
 
 describe("registry", () => {
-  const store = memoryStore();
+  const store = memoryStore({ fingerprints: new Set([JANE, OMAR]) });
   const server = createServer({ store, internalToken: "gw-secret" });
   let base;
 
@@ -26,8 +27,7 @@ describe("registry", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key_fingerprint: fingerprint, ...body }),
     });
-  const lookup = (id, token = "gw-secret") =>
-    fetch(`${base}/v1/sessions/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+  const lookup = (id, token = "gw-secret") => fetch(`${base}/v1/sessions/${id}`, { headers: { Authorization: `Bearer ${token}` } });
 
   it("stores the ticket a developer's session is on and serves it to the gateway", async () => {
     assert.equal((await report(JANE, { session_id: "s-1", ticket: "ENG-1", branch: "jane/eng-1", event: "SessionStart" })).status, 204);
@@ -53,21 +53,14 @@ describe("registry", () => {
     assert.equal((await (await lookup("s-1")).json()).ticket, null);
   });
 
-  it("refuses a different key re-pointing someone else's session, and a missing fingerprint", async () => {
-    assert.equal((await report(OMAR, { session_id: "s-1", ticket: "ENG-9" })).status, 403);
-    assert.equal((await report("not-a-fingerprint", { session_id: "s-2", ticket: "ENG-1" })).status, 400);
-    assert.equal((await report(undefined, { session_id: "s-2", ticket: "ENG-1" })).status, 400);
-  });
-
-  it("keeps a subagent's ticket separate from its session's", async () => {
-    await report(JANE, { session_id: "s-3", ticket: "ENG-10", event: "SessionStart" });
-    await report(JANE, { session_id: "s-3", agent_id: "agent-1", ticket: "ENG-11", event: "CwdChanged" });
-    assert.equal((await (await lookup("s-3")).json()).ticket, "ENG-10");
-    assert.equal((await (await fetch(`${base}/v1/sessions/s-3?agent_id=agent-1`, { headers: { Authorization: "Bearer gw-secret" } })).json()).ticket, "ENG-11");
-    // A subagent without its own record counts toward the session.
-    assert.equal((await (await fetch(`${base}/v1/sessions/s-3?agent_id=agent-2`, { headers: { Authorization: "Bearer gw-secret" } })).json()).ticket, "ENG-10");
-    // Another key can't add a subagent record to someone else's session.
-    assert.equal((await report(OMAR, { session_id: "s-3", agent_id: "agent-9", ticket: "ENG-99" })).status, 403);
+  it("accepts only active LiteLLM keys, and never lets another key take a session", async () => {
+    const unknown = await report(UNKNOWN, { session_id: "s-2", ticket: "ENG-1" });
+    assert.equal(unknown.status, 403);
+    assert.match((await unknown.json()).error, /master key/);
+    const taken = await report(OMAR, { session_id: "s-1", ticket: "ENG-9" });
+    assert.equal(taken.status, 403);
+    assert.match((await taken.json()).error, /Start a new Claude Code session/);
+    assert.equal(store.events.filter((e) => e.ticket === "ENG-9").length, 0);
   });
 
   it("serves lookups only to the gateway", async () => {
@@ -75,15 +68,16 @@ describe("registry", () => {
     assert.equal((await lookup("unknown-session")).status, 404);
   });
 
-  it("rejects malformed reports", async () => {
+  it("rejects malformed reports, including tickets that aren't keys", async () => {
     assert.equal((await report(JANE, { session_id: "../etc", ticket: "ENG-1" })).status, 400);
+    assert.equal((await report("not-a-fingerprint", { session_id: "s-3", ticket: "ENG-1" })).status, 400);
+    assert.equal((await report(JANE, { session_id: "s-3", ticket: "x,ENG-1" })).status, 400);
     assert.match(parseReport("{"), /JSON/);
-    assert.match(parseReport(JSON.stringify({ session_id: "s", key_fingerprint: JANE, ticket: 5 })), /ticket/);
   });
 });
 
 describe("rateLimiter", () => {
-  it("allows a burst per window, then refuses until the window resets", () => {
+  it("allows a burst per window per key, then refuses until the window resets", () => {
     let t = 0;
     const allow = rateLimiter({ limit: 2, windowMs: 1000, now: () => t });
     assert.deepEqual([allow("a"), allow("a"), allow("a"), allow("b")], [true, true, false, true]);
