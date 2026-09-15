@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import { CONTRACT_FILE, findTicketKey, keyFromTag, loadContract, type TicketContract } from "../lib/contract.ts";
-import { reportSession, trustedRegistryUrl, type SessionReport } from "../lib/registry-client.ts";
+import { reportSession, type SessionReport } from "../lib/registry-client.ts";
 import { ensureCommitTrailerHook } from "./git-trailer.ts";
 import { BUNDLE_PATH } from "./hint.ts";
 
@@ -65,7 +65,12 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
 
   const root = git(["rev-parse", "--show-toplevel"], cwd);
   if (!root || !existsSync(path.join(root, CONTRACT_FILE))) {
-    // Not a repo that adopted tokens-per-ticket (or not a repo at all).
+    // Not a repo that adopted tokens-per-ticket (or not a repo at all). A
+    // session that moved here from a ticket must stop counting toward it.
+    if (event === "CwdChanged" && input.session_id) {
+      const left = await leaveTicket(input.session_id, env, { report, stateDir, now });
+      if (left) return withEvent(event, { systemMessage: `tokens-per-ticket: this directory isn't set up for tokens-per-ticket, so the session no longer counts toward ${left}.` });
+    }
     return event === "SessionStart" || event === "CwdChanged" ? withEvent(event, {}) : {};
   }
 
@@ -93,19 +98,9 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const problems: string[] = [];
   if (!env.ANTHROPIC_BASE_URL) problems.push("Claude Code isn't pointed at the LiteLLM gateway (ANTHROPIC_BASE_URL is not set), so no spend from this session reaches it.");
 
-  const registry = trustedRegistryUrl({
-    envUrl: env.TPT_REGISTRY_URL,
-    repoUrl: contract.automation.registry_url,
-    gatewayUrl: env.ANTHROPIC_BASE_URL,
-  });
-  const registryUrl = registry.url;
+  const registryUrl = env.TPT_REGISTRY_URL || contract.automation.registry_url;
   const gatewayKey = gatewayKeyFrom(env);
   const automatic = contract.automation.sessions && registryUrl;
-  if (contract.automation.sessions && registry.ignored && env.ANTHROPIC_BASE_URL) {
-    problems.push(
-      `automation.registry_url (${registry.ignored}) isn't on the gateway's host, so it's ignored. Set TPT_REGISTRY_URL in your Claude Code settings to use it.`,
-    );
-  }
 
   let reported: "sent" | "skipped" | "failed" = "skipped";
   // Whether the registry has this session's current ticket, as far as we know.
@@ -113,7 +108,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   let failure = "";
   if (automatic && env.ANTHROPIC_BASE_URL && input.session_id) {
     if (!gatewayKey) {
-      problems.push("No gateway key in ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY, so this session can't be reported to the registry.");
+      problems.push("No gateway key in ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY, or x-litellm-api-key in ANTHROPIC_CUSTOM_HEADERS, so this session can't be reported to the registry.");
     } else {
       const stateId = input.session_id;
       const state = readState(stateDir, stateId);
@@ -133,7 +128,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
         reported = result.ok ? "sent" : "failed";
         if (!result.ok) failure = result.reason;
         const alreadyWarned = state?.failed && state.reason === failure;
-        writeState(stateDir, stateId, { ticket, branch, root, at: now(), failed: !result.ok, reason: failure });
+        writeState(stateDir, stateId, { ticket, branch, root, registryUrl, at: now(), failed: !result.ok, reason: failure });
         if (!result.ok && alreadyWarned && event === "UserPromptSubmit") return {};
       } else {
         registered = state?.failed === false;
@@ -234,7 +229,20 @@ function repoName(root: string): string {
   return remote.replace(/^[a-z+]+:\/\/[^@/]*@/i, "").replace(/\.git$/, "");
 }
 
-type State = { ticket: string | null; branch: string | null; root: string; at: number; failed: boolean; reason: string };
+type State = { ticket: string | null; branch: string | null; root: string; registryUrl?: string; at: number; failed: boolean; reason: string };
+
+/** Reports "no ticket" for a session last reported on one. Returns that ticket, if it did. */
+async function leaveTicket(sessionId: string, env: Env, { report, stateDir, now }: Deps): Promise<string | null> {
+  const state = readState(stateDir, sessionId);
+  const gatewayKey = gatewayKeyFrom(env);
+  if (!state?.ticket || !state.registryUrl || !gatewayKey) return null;
+  const result = await report(
+    { session_id: sessionId, ticket: null, branch: null, repo: null, event: "CwdChanged" },
+    { registryUrl: state.registryUrl, gatewayKey },
+  );
+  writeState(stateDir, sessionId, { ...state, ticket: null, branch: null, at: now(), failed: !result.ok, reason: result.ok ? "" : result.reason });
+  return state.ticket;
+}
 
 function readState(dir: string, sessionId: string): State | null {
   try {

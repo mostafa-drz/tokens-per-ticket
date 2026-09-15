@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
@@ -8,7 +8,7 @@ import { HOOK_SCRIPT, ensureCommitTrailerHook, runGitTrailer } from "../../src/c
 import { HOOK_COMMAND, handleHook } from "../../src/cli/hook.ts";
 import { mergeHookSettings } from "../../src/cli/init.ts";
 import { loadContract } from "../../src/lib/contract.ts";
-import { trustedRegistryUrl, type SessionReport } from "../../src/lib/registry-client.ts";
+import { type SessionReport } from "../../src/lib/registry-client.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const dir = mkdtempSync(path.join(os.tmpdir(), "tpt-hook-"));
@@ -128,48 +128,29 @@ describe("session hook", () => {
     assert.equal(reports[0]?.gatewayKey, "sk-jane");
   });
 
+  it("stops counting toward a ticket when the session moves into a repo that isn't set up", async () => {
+    const root = productRepo("jane/eng-51-x");
+    const plain = path.join(dir, "plain-cwd");
+    execFileSync("git", ["init", "-q", plain]);
+    const { reports, deps } = recorder();
+    await handleHook({ hook_event_name: "SessionStart", session_id: "s-move", cwd: root }, connected, deps);
+    const output = await handleHook({ hook_event_name: "CwdChanged", session_id: "s-move", cwd: root, new_cwd: plain }, connected, deps);
+    assert.deepEqual(
+      reports.map((r) => r.ticket),
+      ["ENG-51", null],
+    );
+    assert.match(output.systemMessage ?? "", /no longer counts toward ENG-51/);
+    // Nothing to leave the second time.
+    await handleHook({ hook_event_name: "CwdChanged", session_id: "s-move", cwd: plain, new_cwd: plain }, connected, deps);
+    assert.equal(reports.length, 2);
+  });
+
   it("stays silent in a repo that hasn't adopted tokens-per-ticket", async () => {
     const root = path.join(dir, "plain");
     execFileSync("git", ["init", "-q", root]);
     const { reports, deps } = recorder();
     assert.deepEqual(await handleHook({ hook_event_name: "SessionStart", session_id: "s9", cwd: root }, connected, deps), {});
     assert.equal(reports.length, 0);
-  });
-});
-
-describe("registry URL trust", () => {
-  it("prefers TPT_REGISTRY_URL from the user's or org's settings", () => {
-    assert.deepEqual(trustedRegistryUrl({ envUrl: "https://tpt.corp.dev", repoUrl: "https://evil.example", gatewayUrl: "https://gw.corp.dev" }), {
-      url: "https://tpt.corp.dev",
-    });
-  });
-
-  it("uses the repo's registry_url only on the gateway's host", () => {
-    assert.equal(trustedRegistryUrl({ repoUrl: "http://localhost:4100", gatewayUrl: "http://localhost:4000" }).url, "http://localhost:4100");
-    assert.deepEqual(trustedRegistryUrl({ repoUrl: "https://evil.example/collect", gatewayUrl: "https://gw.corp.dev" }), {
-      url: null,
-      ignored: "https://evil.example/collect",
-    });
-    assert.equal(trustedRegistryUrl({ repoUrl: "http://localhost:4100" }).url, null);
-    // Same host but plain HTTP would send the key in the clear.
-    assert.equal(trustedRegistryUrl({ repoUrl: "http://gw.corp.dev:8080", gatewayUrl: "https://gw.corp.dev" }).url, null);
-    assert.equal(trustedRegistryUrl({ repoUrl: "https://gw.corp.dev/registry", gatewayUrl: "https://gw.corp.dev" }).url, "https://gw.corp.dev/registry");
-  });
-
-  it("doesn't report to a registry a branch pointed elsewhere, and says why", async () => {
-    const root = productRepo("jane/eng-50-x");
-    writeFileSync(
-      path.join(root, "tokens-per-ticket.yaml"),
-      readFileSync(path.join(root, "tokens-per-ticket.yaml"), "utf8").replace('registry_url: "http://localhost:4100"', 'registry_url: "https://evil.example"'),
-    );
-    const { reports, deps } = recorder();
-    const output = await handleHook(
-      { hook_event_name: "SessionStart", session_id: "s-evil", cwd: root },
-      { ANTHROPIC_BASE_URL: "http://localhost:4000", ANTHROPIC_AUTH_TOKEN: "sk-jane" },
-      deps,
-    );
-    assert.equal(reports.length, 0);
-    assert.match(output.systemMessage ?? "", /isn't on the gateway's host, so it's ignored/);
   });
 });
 
@@ -212,6 +193,13 @@ describe("commit trailer", () => {
     const output = await handleHook({ hook_event_name: "SessionStart", session_id: "s-fail", cwd: root }, connected, deps);
     assert.doesNotMatch(output.hookSpecificOutput?.additionalContext ?? "", /count toward ticket/);
     assert.match(output.hookSpecificOutput?.additionalContext ?? "", /isn't attributed to ENG-48 yet/);
+  });
+
+  it("leaves a committed hooks folder (core.hooksPath) alone", () => {
+    const root = productRepo("jane/eng-49-x");
+    execFileSync("git", ["-C", root, "config", "core.hooksPath", ".husky"]);
+    assert.equal(ensureCommitTrailerHook(root, loadContract(root)), "tracked");
+    assert.equal(existsSync(path.join(root, ".husky")), false);
   });
 
   it("installs the git hook, and never overwrites someone else's", () => {

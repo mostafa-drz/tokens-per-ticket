@@ -3,9 +3,9 @@
  * (registry/src/server.mjs). Called from the hooks, so it must be quick and
  * must never throw: a slow or down registry only means untagged spend.
  *
- * It authenticates with the developer's LiteLLM virtual key. Only send it to a
- * URL from trustedRegistryUrl(): the user's own settings, or the gateway's
- * host, which receives that key on every model call anyway.
+ * It authenticates with the developer's LiteLLM virtual key. The URL comes
+ * from TPT_REGISTRY_URL or the repo's tokens-per-ticket.yaml; both are as
+ * trusted as the repo's .claude/settings.json, which can set either.
  */
 
 export type SessionReport = {
@@ -36,34 +36,4 @@ export async function reportSession(
     const reason = error instanceof Error && error.name === "TimeoutError" ? "timed out" : String(error);
     return { ok: false, reason: `could not reach the registry at ${config.registryUrl} (${reason})` };
   }
-}
-
-/**
- * The registry URL to use, from trusted configuration only, because the hook
- * sends the developer's gateway key there.
- *
- * TPT_REGISTRY_URL comes from the user's or the organization's Claude Code
- * settings. The repository's `automation.registry_url` is a default that any
- * branch can change, so it's honored only on the same host as
- * ANTHROPIC_BASE_URL, which the user configured and which already receives
- * the key, and only over HTTPS (plain HTTP only on this machine).
- */
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-export function trustedRegistryUrl(input: {
-  envUrl?: string;
-  repoUrl?: string;
-  gatewayUrl?: string;
-}): { url: string | null; ignored?: string } {
-  if (input.envUrl) return { url: input.envUrl };
-  if (!input.repoUrl) return { url: null };
-  try {
-    const repo = new URL(input.repoUrl);
-    const gatewayHost = input.gatewayUrl ? new URL(input.gatewayUrl).hostname : null;
-    const secure = repo.protocol === "https:" || (repo.protocol === "http:" && LOOPBACK.has(repo.hostname));
-    if (gatewayHost && repo.hostname === gatewayHost && secure) return { url: input.repoUrl };
-  } catch {
-    // Malformed URL: treat as untrusted.
-  }
-  return { url: null, ignored: input.repoUrl };
 }
