@@ -248,6 +248,20 @@ describe("commit trailer", () => {
     assert.equal(run(HOOK_SCRIPT, ["MSG"]), "ran git-trailer");
   });
 
+  it("fills the fallback copy from the default branch, never from the checked-out branch", async () => {
+    const root = productRepo("main");
+    const commit = (args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com", ...args]);
+    mkdirSync(path.join(root, ".tokens-per-ticket"), { recursive: true });
+    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// reviewed on main\n");
+    commit(["add", "-A"]);
+    commit(["commit", "-q", "-m", "adopt"]);
+    execFileSync("git", ["-C", root, "switch", "-q", "-c", "mallory/eng-60-x"]);
+    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// planted on a branch\n");
+
+    await handleHook({ hook_event_name: "SessionStart", session_id: "s-copy", cwd: root }, { ...connected, CLAUDE_PROJECT_DIR: root }, recorder().deps);
+    assert.equal(readFileSync(path.join(root, ".git/tokens-per-ticket.mjs"), "utf8"), "// reviewed on main\n");
+  });
+
   it("on a branch without the CLI, runs the copy in the git directory, or nothing", () => {
     const root = productRepo("jane/eng-47-x");
     const run = () => execFileSync("sh", ["-c", HOOK_COMMAND], { cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8" });

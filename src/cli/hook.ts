@@ -295,21 +295,24 @@ function sameRepo(root: string, projectDir: string | undefined): boolean {
 }
 
 /**
- * Keeps a copy of the committed CLI in this repository's git directory, for
- * HOOK_COMMAND to run on a branch that has none (one from before adoption), so
- * the hook can still clear the ticket the session was on. Refreshed at every
- * session start; it only ever holds this repository's own committed CLI.
+ * Keeps a copy of the CLI committed on the default branch in this repository's
+ * git directory, for HOOK_COMMAND to run on a branch that has none (one from
+ * before adoption), so the hook can still clear the ticket the session was on.
+ * It comes from the default branch (origin/HEAD, else main), which the team
+ * reviews, never from the checked-out branch, so a branch can't plant code
+ * that later runs on other branches.
  */
 function keepFallbackCopy(root: string): void {
   try {
-    const source = path.join(root, BUNDLE_PATH);
     const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root);
-    if (!commonDir || !existsSync(source)) return;
+    const ref = git(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], root) || (git(["rev-parse", "--verify", "--quiet", "refs/heads/main"], root) ? "main" : "");
+    if (!commonDir || !ref) return;
+    const committed = execFileSync("git", ["show", `${ref}:${BUNDLE_PATH}`], { cwd: root, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 16 * 1024 * 1024 });
     const copy = path.join(commonDir, FALLBACK_CLI);
-    if (existsSync(copy) && readFileSync(copy).equals(readFileSync(source))) return;
-    writeFileSync(copy, readFileSync(source));
+    if (existsSync(copy) && readFileSync(copy).equals(committed)) return;
+    writeFileSync(copy, committed);
   } catch {
-    // Best effort: without it, a pre-adoption branch keeps the last ticket.
+    // No CLI on the default branch yet: without the copy, a pre-adoption branch keeps the last ticket.
   }
 }
 
