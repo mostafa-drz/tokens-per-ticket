@@ -51,7 +51,15 @@ function asObject(value: unknown): Record<string, unknown> {
 function parseMetrics(value: unknown): SpendMetrics {
   const source = asObject(value);
   const metrics = {} as SpendMetrics;
-  for (const field of METRIC_FIELDS) metrics[field] = typeof source[field] === "number" ? source[field] : 0;
+  for (const field of METRIC_FIELDS) {
+    const value = source[field];
+    // Missing means none. Anything else that isn't a number is a response this
+    // client doesn't understand, and reporting 0 would understate spend.
+    if (value !== undefined && value !== null && typeof value !== "number") {
+      throw new LiteLLMError(`LiteLLM returned ${field} as ${JSON.stringify(value)}; this client expects a number.`);
+    }
+    metrics[field] = typeof value === "number" ? value : 0;
+  }
   return metrics;
 }
 

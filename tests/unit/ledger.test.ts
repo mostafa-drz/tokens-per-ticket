@@ -110,6 +110,8 @@ describe("fetchTagActivity", () => {
     assert.equal(page.results[0].breakdown.entities["ticket:ENG-1"].metrics.spend, 0);
     assert.equal(page.metadata.has_more, false);
     assert.throws(() => parseActivityPage({ detail: "Not found" }), /unexpected/);
+    // A value it can't read is an error, not a silent zero.
+    assert.throws(() => parseActivityPage({ results: [{ date: "2026-09-14", metrics: { spend: "0.42" } }] }), /spend as "0.42"/);
   });
 
   it("lists dates newest first and refuses more than a year", () => {
