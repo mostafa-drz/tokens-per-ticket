@@ -112,6 +112,15 @@ class SessionTicketTaggerTest(unittest.TestCase):
             self.assertIsInstance(result, str)
             self.assertIn("set by the gateway", result)
 
+    def test_refuses_pass_through_calls_unless_allowed(self):
+        data = {"model": "claude-sonnet-5", "messages": []}
+        result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, data, "pass_through_endpoint"))
+        self.assertIn("pass-through routes are off", result)
+        self.plugin.allow_pass_through = True
+        self.plugin._client = _Client({})
+        result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, data, "pass_through_endpoint"))
+        self.assertIs(result, data)
+
     def test_other_client_tags_are_fine(self):
         tags, _ = self.run_hook(self.jane_token, request(tags=["team:web"]), {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
         self.assertEqual(tags, ["team:web", "ticket:ENG-1"])

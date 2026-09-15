@@ -14,6 +14,12 @@ Rules:
 - With the plugin on, ticket tags come only from the registry. A request that
   sets its own `ticket:` tag (header or body) is rejected with a clear error,
   so a key can't charge its spend to an arbitrary ticket.
+- Pass-through routes (/anthropic/*, /vertex_ai/*, ...) hand this hook no
+  request headers, and LiteLLM merges their x-litellm-tags only after it runs,
+  so a ticket claim there can't be checked. With the registry on, the plugin
+  refuses pass-through calls unless TPT_ALLOW_PASS_THROUGH=true (for a shared
+  gateway that serves product traffic that way; restrict developer keys with
+  allowed_routes then). Claude Code uses /v1/messages, not pass-through.
 - LiteLLM records spend tags from a copy of the request metadata held by its
   logging object (`model_call_details.litellm_params`), taken before plugins
   run, and prefers it over the request's own metadata (checked on v1.100.1,
@@ -58,11 +64,17 @@ class SessionTicketTagger(CustomLogger):
         self.timeout = float(os.environ.get("TPT_TIMEOUT_SECONDS", "0.3"))
         # After a registry error, skip lookups for this long.
         self.backoff_seconds = float(os.environ.get("TPT_BACKOFF_SECONDS", "15"))
+        self.allow_pass_through = os.environ.get("TPT_ALLOW_PASS_THROUGH", "").lower() in ("1", "true", "yes")
         self._cache: dict[str, tuple[float, dict | None]] = {}
         self._skip_until = 0.0
         self._client: httpx.AsyncClient | None = None
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+        if self.registry_url and self.registry_token and call_type == "pass_through_endpoint" and not self.allow_pass_through:
+            return (
+                "tokens-per-ticket: pass-through routes are off on this gateway because their spend tags can't be verified. "
+                "Use /v1/messages (as Claude Code does), or set TPT_ALLOW_PASS_THROUGH=true and restrict developer keys with allowed_routes."
+            )
         if self.registry_url and self.registry_token and self._client_ticket_tags(data):
             # Keep the refused request from being logged under the claimed ticket.
             for tags in self._tag_lists(data):

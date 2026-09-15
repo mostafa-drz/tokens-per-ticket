@@ -136,10 +136,12 @@ curl -X POST "$LITELLM_BASE_URL/user/new" \
   -d '{"user_id": "mostafa", "user_role": "internal_user", "auto_create_key": false}'
 curl -X POST "$LITELLM_BASE_URL/key/generate" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"key_alias": "mostafa", "user_id": "mostafa", "team_id": "<team_id>", "max_budget": 200, "budget_duration": "30d"}'
+  -d '{"key_alias": "mostafa", "user_id": "mostafa", "team_id": "<team_id>", "max_budget": 200, "budget_duration": "30d", "allowed_routes": ["anthropic_routes"]}'
 ```
 
 Checked on `v1.100.1`: a key over its team's budget gets `429 budget_exceeded`. The budget is checked before a call and charged after it, so one long request can overshoot it. Add `"models": [...]` to a key to keep some models off-limits.
+
+`"allowed_routes": ["anthropic_routes"]` limits a developer key to what Claude Code calls (`/v1/messages`, token counting). Checked on `v1.100.1`: the same key gets 403 on pass-through routes such as `/anthropic/*` and on `/v1/chat/completions`. Pass-through routes can't be attributed safely, because LiteLLM applies their tag headers after plugins run. The plugin refuses them when the registry is on, unless you set `TPT_ALLOW_PASS_THROUGH=true` for a gateway that also serves product traffic that way.
 
 Developer keys can't read the organization's spend. A key without a user answers 401 on `/tag/daily/activity`. A key bound to an `internal_user` answers **200 with only its own keys' spend** (`_get_tag_daily_activity_api_key_filter` in LiteLLM's `tag_management_endpoints.py`). Never point the ledger or a shared report job at a developer's key: it shows a fraction of the spend and no error.
 
