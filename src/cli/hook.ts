@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CONTRACT_FILE, findTicketKey, keyFromTag, loadContract, type TicketContract } from "../lib/contract.ts";
@@ -25,6 +25,8 @@ import { BUNDLE_PATH } from "./hint.ts";
 export type HookInput = {
   hook_event_name?: string;
   session_id?: string;
+  /** Set when the hook fires inside a subagent. */
+  agent_id?: string;
   cwd?: string;
   source?: string;
   session_title?: string;
@@ -55,7 +57,7 @@ const REPORT_EVERY_MS = 10 * 60_000;
 export async function handleHook(input: HookInput, env: Env = process.env, deps: Partial<Deps> = {}): Promise<HookOutput> {
   const { report, stateDir, now } = {
     report: reportSession,
-    stateDir: path.join(os.tmpdir(), "tokens-per-ticket", "sessions"),
+    stateDir: defaultStateDir(),
     now: Date.now,
     ...deps,
   };
@@ -83,6 +85,9 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const watchPaths = headPath ? [headPath] : [];
   const explicit = explicitTicket(env.ANTHROPIC_CUSTOM_HEADERS, contract);
 
+  // Inside a subagent, report for that subagent only: its worktree or `cd`
+  // must not move the main conversation's ticket or rename the session.
+  const agentId = input.agent_id || undefined;
   const startEvent = event === "SessionStart" || event === "CwdChanged";
   let cliNotice: string | undefined;
   if (startEvent) {
@@ -94,7 +99,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     ensureCommitTrailerHook(root, contract);
   }
 
-  const title = event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
+  const title = !agentId && event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
 
   // Where calls go and who makes them. Without both, the registry can't help.
   const problems: string[] = cliNotice ? [cliNotice] : [];
@@ -120,12 +125,14 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     if (!gatewayKey) {
       problems.push("No gateway key in ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY, so this session can't be reported to the registry.");
     } else {
-      const state = readState(stateDir, input.session_id);
+      const stateId = agentId ? `${input.session_id}.${agentId}` : input.session_id;
+      const state = readState(stateDir, stateId);
       const changed = !state || state.ticket !== ticket || state.branch !== branch || state.root !== root;
       const due = !state || now() - state.at > REPORT_EVERY_MS || state.failed;
       if (event !== "UserPromptSubmit" || changed || due) {
         const payload: SessionReport = {
           session_id: input.session_id,
+          ...(agentId ? { agent_id: agentId } : {}),
           key_fingerprint: keyFingerprint(gatewayKey),
           ticket,
           branch,
@@ -137,20 +144,22 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
         reported = result.ok ? "sent" : "failed";
         if (!result.ok) failure = result.reason;
         const alreadyWarned = state?.failed && state.reason === failure;
-        writeState(stateDir, input.session_id, { ticket, branch, root, at: now(), failed: !result.ok, reason: failure });
+        writeState(stateDir, stateId, { ticket, branch, root, at: now(), failed: !result.ok, reason: failure });
         if (!result.ok && alreadyWarned && event === "UserPromptSubmit") return {};
       }
       if (reported === "failed") problems.push(`Couldn't report this session to the registry: ${failure}. Its spend isn't attributed until that works.`);
     }
   }
 
-  if (explicit && ticket && explicit !== ticket) {
+  // With the registry on, the gateway plugin ignores client ticket tags and
+  // follows the branch. Without it, an explicit tag from `tpt start` counts.
+  if (!automatic && explicit && ticket && explicit !== ticket) {
     problems.push(`This session was started with ticket ${explicit}, which the gateway keeps even though the branch is ${ticket}. Start a new session to follow the branch.`);
   }
 
-  const billedTo = explicit ?? (automatic ? ticket : null);
+  const billedTo = automatic ? ticket : explicit;
   const context = billedTo
-    ? `tokens-per-ticket: model calls in this session count toward ticket ${billedTo}${explicit ? "" : ", following the current branch automatically"}.`
+    ? `tokens-per-ticket: model calls in this session count toward ticket ${billedTo}${automatic ? ", following the current branch automatically" : ""}.`
     : `tokens-per-ticket: branch "${branch ?? "(detached)"}" doesn't name a ticket, so this session's spend isn't attributed to one.`;
 
   if (event === "UserPromptSubmit") {
@@ -226,11 +235,23 @@ function readState(dir: string, sessionId: string): State | null {
 
 function writeState(dir: string, sessionId: string, state: State): void {
   try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, `${safe(sessionId)}.json`), JSON.stringify(state));
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // "wx" after unlinking: never write through an existing symlink or file.
+    const file = path.join(dir, `${safe(sessionId)}.json`);
+    rmSync(file, { force: true });
+    writeFileSync(file, JSON.stringify(state), { flag: "wx", mode: 0o600 });
   } catch {
     // State only avoids duplicate reports. Losing it costs one extra request.
   }
+}
+
+/**
+ * Per-user state, never a shared temp directory: on a shared machine another
+ * user could plant a symlink at a predictable /tmp path.
+ */
+function defaultStateDir(): string {
+  const base = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
+  return path.join(base, "tokens-per-ticket", "sessions");
 }
 
 function safe(id: string): string {

@@ -12,6 +12,8 @@ import { createHash } from "node:crypto";
 
 export type SessionReport = {
   session_id: string;
+  /** Set for reports from inside a subagent. */
+  agent_id?: string;
   key_fingerprint: string;
   ticket: string | null;
   branch: string | null;
