@@ -3,21 +3,15 @@
  *
  * Proves the automatic loop against a running gateway, without a provider key
  * or a Claude Code session. It does what the hooks and Claude Code do:
- *   1. creates a temporary virtual key (the admin key in .env.local)
- *   2. reports two sessions to the registry, on tickets SMOKE-1 and SMOKE-2,
- *      with that key
+ *   1. creates a temporary virtual key (with the admin key in .env.local)
+ *   2. reports two sessions to the registry, on tickets SMOKE-1 and SMOKE-2
  *   3. calls the priced mock model with only `x-claude-code-session-id`
  *   4. waits for LiteLLM to write spend and reads it back per ticket
  * Then it deletes the temporary key.
  */
 import { randomUUID } from "node:crypto";
-import { loadContract } from "../src/lib/contract.ts";
 import { loadEnvLocal } from "../src/lib/env.ts";
-import { formatTokens, formatUsd } from "../src/lib/format.ts";
-import { summarizeTickets } from "../src/lib/ledger.ts";
-import { fetchTagActivity, lastDays } from "../src/lib/litellm.ts";
 import { reportSession } from "../src/lib/registry-client.ts";
-import { requestsByKey, smokeLanded } from "../src/lib/smoke.ts";
 
 loadEnvLocal([process.cwd()]);
 const baseUrl = process.env.LITELLM_BASE_URL || "http://localhost:4000";
@@ -28,12 +22,13 @@ if (!adminKey) {
   process.exit(1);
 }
 
-const loaded = loadContract();
-// SMOKE-* keys must parse even when the team narrows key.teams to [ENG, ...].
-const contract = { ...loaded, key: { ...loaded.key, teams: [] } };
 const calls: Record<string, number> = { "SMOKE-1": 3, "SMOKE-2": 1 };
-const tickets = Object.keys(calls);
-const range = lastDays(1);
+const today = new Date().toISOString().slice(0, 10);
+
+function fail(message: string): never {
+  console.error(`\n✖ ${message}`);
+  process.exit(1);
+}
 
 async function admin(path: string, body: unknown) {
   const response = await fetch(new URL(path, baseUrl), {
@@ -45,16 +40,18 @@ async function admin(path: string, body: unknown) {
   return response.json() as Promise<Record<string, unknown>>;
 }
 
-async function smokeRequests() {
-  const rows = summarizeTickets(await fetchTagActivity(range, { baseUrl, apiKey: adminKey! }), contract).filter((row) =>
-    tickets.includes(row.key),
-  );
-  return { rows, counts: requestsByKey(rows, tickets) };
-}
-
-function fail(message: string): never {
-  console.error(`\n✖ ${message}`);
-  process.exit(1);
+/** Requests recorded today for each ticket tag, straight from LiteLLM. */
+async function requests(): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const ticket of Object.keys(calls)) {
+    const url = new URL("/tag/daily/activity", baseUrl);
+    url.search = new URLSearchParams({ tags: `ticket:${ticket}`, start_date: today, end_date: today, page_size: "1000" }).toString();
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${adminKey}` }  });
+    if (!response.ok) fail(`${response.status} from /tag/daily/activity. Is LITELLM_API_KEY an admin or viewer key?`);
+    const body = (await response.json()) as { results?: { metrics?: { api_requests?: number } }[] };
+    counts[ticket] = (body.results ?? []).reduce((total, day) => total + (day.metrics?.api_requests ?? 0), 0);
+  }
+  return counts;
 }
 
 let temporaryKey: string | undefined;
@@ -64,10 +61,10 @@ try {
   if (unauthenticated.ok) fail("The gateway accepted a made-up key for an admin route. LITELLM_MASTER_KEY isn't reaching LiteLLM; check gateway/.env.");
 
   // Earlier runs already left SMOKE-* spend today. Only count what this run adds.
-  const baseline = (await smokeRequests()).counts;
+  const before = await requests();
 
   temporaryKey = String((await admin("/key/generate", { key_alias: `tpt-smoke-${Date.now().toString(36)}`, duration: "1h" })).key);
-  console.log(`1. Created a temporary virtual key`);
+  console.log("1. Created a temporary virtual key");
 
   for (const [ticket, count] of Object.entries(calls)) {
     const sessionId = randomUUID();
@@ -95,25 +92,18 @@ try {
   while (Date.now() - started < 120_000) {
     await new Promise((resolve) => setTimeout(resolve, 5_000));
     process.stdout.write(".");
-    const { rows, counts } = await smokeRequests();
-    if (smokeLanded(baseline, counts, calls)) {
+    const now = await requests();
+    const added = Object.fromEntries(Object.keys(calls).map((ticket) => [ticket, now[ticket] - (before[ticket] ?? 0)]));
+    if (Object.entries(calls).every(([ticket, count]) => added[ticket] >= count)) {
       console.log("\n");
-      for (const row of rows) {
-        const added = row.requests - (baseline[row.key] ?? 0);
-        console.log(
-          `   ${row.key.padEnd(8)} +${added} this run  (today: ${row.requests} requests, ${formatTokens(row.totalTokens)} tokens, ${formatUsd(row.spend)})`,
-        );
+      for (const [ticket, count] of Object.entries(calls)) {
+        console.log(`   ${ticket.padEnd(8)} +${added[ticket]} this run (${count} expected), ${now[ticket]} requests today`);
       }
-      console.log("\n✓ The gateway attributed each session's calls to its ticket. Try: pnpm tpt report SMOKE-1 --days 1\n");
-      process.exitCode = 0;
-      break;
+      console.log("\n✓ The gateway attributed each session's calls to its ticket.\n");
+      process.exit(0);
     }
   }
-  if (process.exitCode !== 0) {
-    fail(
-      "Spend didn't land on the tickets within 2 minutes. Check that the plugin is loaded: docker compose -f gateway/docker-compose.yml logs litellm",
-    );
-  }
+  fail("Spend didn't land on the tickets within 2 minutes. Check that the plugin is loaded: docker compose -f gateway/docker-compose.yml logs litellm");
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 } finally {

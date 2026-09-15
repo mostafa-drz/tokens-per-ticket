@@ -5,20 +5,19 @@
  *   node .tokens-per-ticket/tpt.mjs hook              Claude Code hook (reads JSON on stdin)
  *   node .tokens-per-ticket/tpt.mjs git-trailer ...   git prepare-commit-msg hook
  *   node .tokens-per-ticket/tpt.mjs init              set up a repository
- *   node .tokens-per-ticket/tpt.mjs report [KEY]      what a ticket has cost
+ *   node .tokens-per-ticket/tpt.mjs ticket            the current branch's ticket key and tag
  */
 import { readFileSync } from "node:fs";
 import { runGitTrailer } from "./git-trailer.ts";
 import { handleHook, type HookInput } from "./hook.ts";
 import { runInit } from "./init.ts";
-import { runReport } from "./report.ts";
+import { runTicket } from "./ticket.ts";
 
 const USAGE = `tokens-per-ticket
 
   init --teams <ENG,WEB> [--registry-url <url>]
                                 Set up this repository (once)
-  report [KEY] [--days N] [--post]
-                                What a ticket has cost, from LiteLLM
+  ticket [--branch <name>]      Print the ticket key and spend tag for a branch
   hook                          Claude Code hook (used by .claude/settings.json)
   git-trailer <file> [source]   git prepare-commit-msg hook`;
 
@@ -26,7 +25,7 @@ export async function main(argv: string[]): Promise<void> {
   const [sub, ...rest] = argv;
   switch (sub) {
     case "hook": {
-      let input: HookInput = {};
+      let input: HookInput;
       try {
         input = JSON.parse(readFileSync(0, "utf8"));
       } catch {
@@ -48,8 +47,8 @@ export async function main(argv: string[]): Promise<void> {
       return runGitTrailer(rest);
     case "init":
       return runInit(rest);
-    case "report":
-      return runReport(rest);
+    case "ticket":
+      return runTicket(rest);
     default:
       console.log(USAGE);
       if (sub && sub !== "help" && sub !== "--help" && sub !== "-h") process.exitCode = 1;

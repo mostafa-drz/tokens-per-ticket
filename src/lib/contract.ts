@@ -29,8 +29,6 @@ export type TicketContract = {
     registry_url?: string;
     /** Git trailer added to commits on ticket branches, or false for none. */
     commit_trailer: string | false;
-    /** Where engineers read spend when the machine has no spend-reading key. */
-    ledger_url?: string;
   };
 };
 
@@ -61,7 +59,6 @@ export function parseContract(source: string): TicketContract {
       commit_trailer: trailer as string | false,
       // Only present when set, like the file.
       ...optionalUrl(automation.registry_url, "registry_url"),
-      ...optionalUrl(automation.ledger_url, "ledger_url"),
     },
   };
 }
@@ -85,7 +82,7 @@ function bool(value: unknown, name: string): boolean {
   return value;
 }
 
-function optionalUrl(value: unknown, name: "registry_url" | "ledger_url"): Partial<Record<typeof name, string>> {
+function optionalUrl(value: unknown, name: "registry_url"): Partial<Record<typeof name, string>> {
   if (value === undefined || value === null) return {};
   if (typeof value !== "string" || !URL.canParse(value)) invalid(`automation.${name} must be a URL`);
   return { [name]: value };

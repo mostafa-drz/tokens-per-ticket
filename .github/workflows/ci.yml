@@ -20,12 +20,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:unit
       - name: The CLI entry points start
-        run: pnpm -s tpt help && pnpm -s tpt report --help
+        run: pnpm -s tpt help && pnpm -s tpt ticket --help
       - run: pnpm test:registry
       - run: pnpm test:gateway
       - name: The committed CLI bundle matches the source
         run: pnpm build:cli && git diff --exit-code .tokens-per-ticket/
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
-        env:
-          CI: "true"

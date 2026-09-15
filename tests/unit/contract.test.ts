@@ -109,7 +109,6 @@ branch: { template: "{user}/{key}-{slug}" }
       registry_url: "http://localhost:4100",
       commit_trailer: "Ticket",
     });
-    assert.equal(parseContract(`${base}\nautomation: { ledger_url: "https://tokens.acme.dev" }`).automation.ledger_url, "https://tokens.acme.dev");
   });
 
   it("names the field when the file is wrong", () => {
