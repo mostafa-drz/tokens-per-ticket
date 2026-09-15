@@ -43,6 +43,10 @@ describe("claudeArgs", () => {
     assert.deepEqual(args.slice(2), ["--name", "ENG-1"]);
   });
 
+  it("only names the session in automatic mode", () => {
+    assert.deepEqual(claudeArgs({ key: "ENG-1" }), ["--name", "ENG-1"]);
+  });
+
   it("prints a command that survives a shell", () => {
     assert.equal(
       shellCommand("claude", ["--settings", `{"a":"it's"}`]),

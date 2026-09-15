@@ -151,8 +151,12 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     }
   }
 
-  // With the registry on, the gateway plugin ignores client ticket tags and
-  // follows the branch. Without it, an explicit tag from `tpt start` counts.
+  // With the registry on, the gateway refuses requests that carry their own
+  // ticket tag, so a leftover header would break every call in the session.
+  if (automatic && explicit) {
+    problems.push(`ANTHROPIC_CUSTOM_HEADERS sets ticket ${explicit}, but the gateway sets tickets itself and will refuse these calls. Remove the ticket entry from x-litellm-tags.`);
+  }
+  // Without it, an explicit tag from \`tpt start\` counts.
   if (!automatic && explicit && ticket && explicit !== ticket) {
     problems.push(`This session was started with ticket ${explicit}, which the gateway keeps even though the branch is ${ticket}. Start a new session to follow the branch.`);
   }

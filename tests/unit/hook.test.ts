@@ -107,14 +107,14 @@ describe("session hook", () => {
     assert.equal(reports.length, 0);
   });
 
-  it("follows the branch, not a ticket header, when the registry is on", async () => {
+  it("warns that a leftover ticket header will be refused when the registry is on", async () => {
     const root = productRepo("jane/eng-11-x");
     const output = await handleHook(
       { hook_event_name: "SessionStart", session_id: "s8", cwd: root },
       { ...connected, ANTHROPIC_CUSTOM_HEADERS: "x-litellm-tags: ticket:ENG-7" },
       recorder().deps,
     );
-    assert.equal(output.systemMessage, undefined);
+    assert.match(output.systemMessage ?? "", /will refuse these calls/);
     assert.match(output.hookSpecificOutput?.additionalContext ?? "", /count toward ticket ENG-11, following the current branch/);
   });
 

@@ -55,8 +55,13 @@ export function ticketBranches(branches: string[], key: string, contract: Ticket
   return branches.filter((branch) => findTicketKey(branch, contract) === key);
 }
 
-export function claudeArgs(input: { key: string; headers: string }): string[] {
-  return ["--settings", JSON.stringify({ env: { ANTHROPIC_CUSTOM_HEADERS: input.headers } }), "--name", input.key];
+/**
+ * Without `headers` (automatic mode), only names the session: the hooks and
+ * the gateway plugin attribute it, and the gateway refuses client ticket tags.
+ */
+export function claudeArgs(input: { key: string; headers?: string }): string[] {
+  const settings = input.headers === undefined ? [] : ["--settings", JSON.stringify({ env: { ANTHROPIC_CUSTOM_HEADERS: input.headers } })];
+  return [...settings, "--name", input.key];
 }
 
 /** Quotes arguments so the printed command can be pasted into a POSIX shell. */

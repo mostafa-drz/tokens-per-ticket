@@ -23,6 +23,7 @@ import {
 } from "../lib/contract.ts";
 import { branchExists, git, listWorktrees, localBranches, mainCheckoutRoot, tryGit } from "../lib/git.ts";
 import { claudeArgs, shellCommand, ticketBranches, userSettingsEnv, withTicketTag } from "../lib/launch.ts";
+import { trustedRegistryUrl } from "../lib/registry-client.ts";
 import { detectPackageManager, flagsTakenByNpm, installCommand } from "../lib/package-manager.ts";
 import { command } from "./hint.ts";
 
@@ -119,16 +120,24 @@ export async function runStart(argv: string[]): Promise<void> {
     console.log(`  Run \`${installCommand(manager)}\` there before running the app or its tests.`);
   }
 
-  // 3. Launch Claude Code with the ticket tag.
+  // 3. Launch Claude Code. A settings file's env wins over the shell in Claude
+  // Code, so read it first. https://code.claude.com/docs/en/env-vars
   const userEnv = userSettingsEnv();
-  const headers = withTicketTag(
-    process.env.ANTHROPIC_CUSTOM_HEADERS ?? userEnv.ANTHROPIC_CUSTOM_HEADERS,
-    tag,
-    contract.tag.prefix,
-  );
-  const args = claudeArgs({ key, headers });
+  const env = (name: string) => userEnv[name] ?? process.env[name];
+  const automatic =
+    contract.automation.sessions &&
+    trustedRegistryUrl({
+      envUrl: env("TPT_REGISTRY_URL"),
+      repoUrl: contract.automation.registry_url,
+      gatewayUrl: env("ANTHROPIC_BASE_URL"),
+    }).url;
+  // With the registry, the worktree's branch attributes the session and the
+  // gateway refuses client ticket tags; without it, pass the tag explicitly.
+  const args = automatic
+    ? claudeArgs({ key })
+    : claudeArgs({ key, headers: withTicketTag(env("ANTHROPIC_CUSTOM_HEADERS"), tag, contract.tag.prefix) });
 
-  if (!process.env.ANTHROPIC_BASE_URL && !userEnv.ANTHROPIC_BASE_URL) {
+  if (!env("ANTHROPIC_BASE_URL")) {
     console.warn(
       "\n⚠ ANTHROPIC_BASE_URL is not set in your shell or ~/.claude/settings.json.\n" +
         "  Claude Code will call Anthropic directly and LiteLLM will never see this ticket's tokens.\n" +
@@ -136,7 +145,11 @@ export async function runStart(argv: string[]): Promise<void> {
     );
   }
 
-  console.log(`\n→ Every model call in this session is tagged ${tag}`);
+  console.log(
+    automatic
+      ? `\n→ This worktree's branch attributes the session to ${key} automatically`
+      : `\n→ Every model call in this session is tagged ${tag}`,
+  );
 
   if (values.print || !process.stdout.isTTY) {
     console.log(`\ncd ${shellCommand(worktree, []).trim()} && ${shellCommand("claude", args)}\n`);
