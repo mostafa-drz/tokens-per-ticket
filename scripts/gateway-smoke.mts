@@ -5,7 +5,7 @@
  * or a Claude Code session. It does what the hooks and Claude Code do:
  *   1. creates a temporary virtual key (the admin key in .env.local)
  *   2. reports two sessions to the registry, on tickets SMOKE-1 and SMOKE-2,
- *      with that key's fingerprint
+ *      with that key
  *   3. calls the priced mock model with only `x-claude-code-session-id`
  *   4. waits for LiteLLM to write spend and reads it back per ticket
  * Then it deletes the temporary key.
@@ -16,7 +16,7 @@ import { loadEnvLocal } from "../src/lib/env.ts";
 import { formatTokens, formatUsd } from "../src/lib/format.ts";
 import { summarizeTickets } from "../src/lib/ledger.ts";
 import { fetchTagActivity, lastDays } from "../src/lib/litellm.ts";
-import { keyFingerprint, reportSession } from "../src/lib/registry-client.ts";
+import { reportSession } from "../src/lib/registry-client.ts";
 import { requestsByKey, smokeLanded } from "../src/lib/smoke.ts";
 
 loadEnvLocal([process.cwd()]);
@@ -68,11 +68,10 @@ try {
   for (const [ticket, count] of Object.entries(calls)) {
     const sessionId = randomUUID();
     const reported = await reportSession(
-      { session_id: sessionId, key_fingerprint: keyFingerprint(temporaryKey), ticket, branch: `smoke/${ticket.toLowerCase()}`, repo: "smoke", head: null, event: "SessionStart" },
-      { registryUrl, timeoutMs: 5_000 },
+      { session_id: sessionId, ticket, branch: `smoke/${ticket.toLowerCase()}`, repo: "smoke", event: "SessionStart" },
+      { registryUrl, gatewayKey: temporaryKey, timeoutMs: 5_000 },
     );
     if (!reported.ok) fail(`The registry refused the session: ${reported.reason}. Is it running (pnpm gateway:up)?`);
-    console.log(`2. Reported session ${sessionId.slice(0, 8)} on ${ticket}`);
 
     for (let i = 0; i < count; i++) {
       // The mock model is only priced on the OpenAI-format endpoint.
@@ -83,8 +82,9 @@ try {
       });
       if (!response.ok) fail(`${response.status} from the gateway: ${await response.text()}`);
     }
-    console.log(`3. Sent ${count} ${count === 1 ? "call" : "calls"} with only the session id`);
   }
+  console.log("2. Reported a session on each of SMOKE-1 and SMOKE-2");
+  console.log("3. Called the mock model with only the session id: 3 calls on SMOKE-1, 1 on SMOKE-2");
 
   const started = Date.now();
   process.stdout.write("4. Waiting for LiteLLM to write spend");
@@ -95,11 +95,12 @@ try {
     if (smokeLanded(baseline, counts, calls)) {
       console.log("\n");
       for (const row of rows) {
+        const added = row.requests - (baseline[row.key] ?? 0);
         console.log(
-          `   ${row.key.padEnd(8)} ${formatUsd(row.spend).padStart(8)}  ${formatTokens(row.totalTokens).padStart(6)} tokens  ${row.requests} ${row.requests === 1 ? "request" : "requests"} today`,
+          `   ${row.key.padEnd(8)} +${added} this run  (today: ${row.requests} requests, ${formatTokens(row.totalTokens)} tokens, ${formatUsd(row.spend)})`,
         );
       }
-      console.log("\n✓ The gateway attributed each session's calls to its ticket. Try: pnpm ticket:report SMOKE-1\n");
+      console.log("\n✓ The gateway attributed each session's calls to its ticket. Try: pnpm tpt report SMOKE-1 --days 1\n");
       process.exitCode = 0;
       break;
     }

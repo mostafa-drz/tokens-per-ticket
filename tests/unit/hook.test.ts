@@ -8,7 +8,7 @@ import { HOOK_SCRIPT, ensureCommitTrailerHook, refreshTrustedCli, runGitTrailer,
 import { HOOK_COMMAND, handleHook } from "../../src/cli/hook.ts";
 import { mergeHookSettings } from "../../src/cli/init.ts";
 import { loadContract } from "../../src/lib/contract.ts";
-import { keyFingerprint, trustedRegistryUrl, type SessionReport } from "../../src/lib/registry-client.ts";
+import { trustedRegistryUrl, type SessionReport } from "../../src/lib/registry-client.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const dir = mkdtempSync(path.join(os.tmpdir(), "tpt-hook-"));
@@ -27,13 +27,13 @@ function productRepo(branch: string): string {
 const connected = { ANTHROPIC_BASE_URL: "http://localhost:4000", ANTHROPIC_AUTH_TOKEN: "sk-jane", TPT_REGISTRY_URL: "http://registry.test" };
 
 function recorder(ok = true) {
-  const reports: SessionReport[] = [];
+  const reports: (SessionReport & { gatewayKey: string })[] = [];
   return {
     reports,
     deps: {
       stateDir: mkdtempSync(path.join(dir, "state-")),
-      report: async (report: SessionReport) => {
-        reports.push(report);
+      report: async (report: SessionReport, config: { gatewayKey: string }) => {
+        reports.push({ ...report, gatewayKey: config.gatewayKey });
         return ok ? ({ ok: true } as const) : ({ ok: false, reason: "could not reach the registry" } as const);
       },
     },
@@ -50,9 +50,8 @@ describe("session hook", () => {
       reports.map((r) => [r.session_id, r.ticket, r.branch, r.event]),
       [["s1", "ENG-123", "jane/eng-123-retry", "SessionStart"]],
     );
-    // The key itself never goes to the registry, only its fingerprint.
-    assert.equal(reports[0].key_fingerprint, keyFingerprint("sk-jane"));
-    assert.ok(!JSON.stringify(reports[0]).includes("sk-jane"));
+    // The key authenticates the report; it isn't part of the stored payload.
+    assert.equal(reports[0].gatewayKey, "sk-jane");
     assert.equal(output.hookSpecificOutput?.sessionTitle, "ENG-123");
     assert.match(output.hookSpecificOutput?.additionalContext ?? "", /count toward ticket ENG-123, following the current branch/);
     assert.equal(realpath(output.hookSpecificOutput?.watchPaths?.[0]), realpath(path.join(root, ".git", "HEAD")));
@@ -126,7 +125,7 @@ describe("session hook", () => {
       { ANTHROPIC_BASE_URL: "http://localhost:4000", TPT_REGISTRY_URL: "http://registry.test", ANTHROPIC_CUSTOM_HEADERS: "x-litellm-api-key: Bearer sk-jane" },
       deps,
     );
-    assert.equal(reports[0]?.key_fingerprint, keyFingerprint("sk-jane"));
+    assert.equal(reports[0]?.gatewayKey, "sk-jane");
   });
 
   it("stays silent in a repo that hasn't adopted tokens-per-ticket", async () => {

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import { CONTRACT_FILE, findTicketKey, keyFromTag, loadContract, type TicketContract } from "../lib/contract.ts";
-import { keyFingerprint, reportSession, trustedRegistryUrl, type SessionReport } from "../lib/registry-client.ts";
+import { reportSession, trustedRegistryUrl, type SessionReport } from "../lib/registry-client.ts";
 import { ensureCommitTrailerHook, refreshTrustedCli } from "./git-trailer.ts";
 import { BUNDLE_PATH } from "./hint.ts";
 
@@ -127,14 +127,12 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
       if (event !== "UserPromptSubmit" || changed || due) {
         const payload: SessionReport = {
           session_id: input.session_id,
-          key_fingerprint: keyFingerprint(gatewayKey),
           ticket,
           branch,
           repo: repoName(root),
-          head: git(["rev-parse", "HEAD"], cwd) || null,
           event,
         };
-        const result = await report(payload, { registryUrl });
+        const result = await report(payload, { registryUrl, gatewayKey });
         reported = result.ok ? "sent" : "failed";
         if (!result.ok) failure = result.reason;
         const alreadyWarned = state?.failed && state.reason === failure;

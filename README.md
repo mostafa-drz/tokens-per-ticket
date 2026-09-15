@@ -91,7 +91,7 @@ cp gateway/.env.example gateway/.env      # local defaults are fine for a trial
 cp .env.example .env.local
 pnpm gateway:up                           # LiteLLM v1.100.1 + the plugin, the registry, Postgres
 pnpm gateway:smoke                        # tagged calls to a priced mock model
-pnpm ticket:report SMOKE-1 --days 1       # the report, straight from LiteLLM
+pnpm tpt report SMOKE-1 --days 1           # the report, straight from LiteLLM
 pnpm dev                                  # the ledger on :3000 (sample data)
 ```
 
@@ -109,7 +109,7 @@ Locally, `pnpm gateway:up` runs all three. For a team, deploy LiteLLM with Postg
 
 Automatic attribution needs two more things next to LiteLLM:
 
-- **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it **LiteLLM's own Postgres** (`DATABASE_URL`): it creates its own `tpt_*` tables and reads LiteLLM's key table, so it only accepts sessions from active virtual keys. Also give it a shared secret, `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS, ideally on the gateway's host; the gateway plugin calls it on the internal network.
+- **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it **LiteLLM's own Postgres** (`DATABASE_URL`): it creates its own `tpt_sessions` table and reads LiteLLM's key table, so it only accepts sessions reported with an active virtual key. Also give it a shared secret, `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS, ideally on the gateway's host; the gateway plugin calls it on the internal network.
 - **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout. After a registry error it skips lookups for 15 seconds, so an outage costs attribution, not latency. The only calls it refuses are ones that set their own `ticket:` tag.
 
 If you already run LiteLLM for your product, you can point development traffic at the same gateway, but check three things first:
@@ -220,7 +220,7 @@ node .tokens-per-ticket/tpt.mjs report                  # the current branch's t
 node .tokens-per-ticket/tpt.mjs report ENG-123 --post   # also create or update the comment on the ticket
 ```
 
-In this repo, `pnpm ticket:report` does the same. The report reads `LITELLM_BASE_URL` and `LITELLM_API_KEY` from `.env.local` (see `.env.example`). That key reads the whole organization's spend (see [step 2](#2-give-each-developer-a-key)), so don't copy it to every laptop. Set `automation.ledger_url` in `tokens-per-ticket.yaml` instead: engineers without the key get a link to the ticket in the ledger.
+In this repo, `pnpm tpt report` does the same. The report reads `LITELLM_BASE_URL` and `LITELLM_API_KEY` from `.env.local` (see `.env.example`). That key reads the whole organization's spend (see [step 2](#2-give-each-developer-a-key)), so don't copy it to every laptop. Set `automation.ledger_url` in `tokens-per-ticket.yaml` instead: engineers without the key get a link to the ticket in the ledger.
 
 Post reports from one place that holds the key, such as CI. For example, when a PR is merged:
 
@@ -254,7 +254,7 @@ jobs:
 To work two tickets side by side, `tpt start` gives each one its own worktree and session:
 
 ```bash
-node .tokens-per-ticket/tpt.mjs start ENG-124 "retry on 429"   # or /ticket-start, or pnpm ticket:start here
+node .tokens-per-ticket/tpt.mjs start ENG-124 "retry on 429"   # or /ticket-start
 ```
 
 It names the branch from the contract, creates the worktree next to the repo without touching your checkout, and launches `claude` there named `ENG-124`. The worktree's branch attributes the session like any other. Use `--print` to get the command instead of launching, and `--base origin/main` to choose where the branch starts.
@@ -286,7 +286,7 @@ Branches are parsed **by the template**, not by searching for something that loo
 
 `{key}` writes the key lowercased, as Linear does. `{KEY}` keeps it as the tracker prints it. Using Jira with `feature/PROJ-42_login`? Set `template: "feature/{KEY}_{slug}"`: Jira only [links branches whose key is uppercase](https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/), and on a case-insensitive file system (macOS) a lowercased `feature/proj-42_login` collides with an existing `feature/PROJ-42_login`. Parsing is case-insensitive either way, so hand-typed branches still count. `report --post` writes to Linear or Jira; see [step 6](#6-see-what-it-cost).
 
-A `teams` allowlist also filters the ledger, `ticket:report`, and the hook: tags for other teams are ignored. That includes the sample data (`TPT-*`) and `ticket:report SMOKE-1`, so try the five-minute loop before you set it.
+A `teams` allowlist also filters the ledger, `ticket:report`, and the hook: tags for other teams are ignored. That includes the sample data (`TPT-*`) and `tpt report SMOKE-1`, so try the five-minute loop before you set it.
 
 ---
 
@@ -343,7 +343,7 @@ Everything lives in the repo and is committed, so the whole team gets it:
 **Who can attribute what**
 
 - **Only the gateway sets tickets.** With the plugin on, a request that sets its own `ticket:` tag (in `x-litellm-tags` or the body) gets a clear 400, and so do pass-through routes such as `/anthropic/*`, where tags can't be checked (`TPT_ALLOW_PASS_THROUGH=true` if a shared gateway needs them). Developer keys with `allowed_routes: ["anthropic_routes"]` can't reach pass-through at all. LiteLLM's spend logging reads a copy of the request metadata taken before plugins run, so the plugin writes the ticket there too (checked on `v1.100.1`).
-- **No key leaves the laptop through the hook.** Hooks send `sha256(sha256(key))`. LiteLLM stores a key as `sha256(key)` and refuses that hash as a credential, so the fingerprint works nowhere as one. The registry accepts reports only for active LiteLLM virtual keys, a session belongs to the key that first reported it, and the plugin only tags calls from that key. A report can only ever attribute the reporter's own calls. The master key isn't a virtual key, so its sessions aren't attributed and the hook says so.
+- **The registry authenticates with the developer's own key.** The hook sends the LiteLLM virtual key it already uses as a bearer token, and only to a trusted registry URL (below). The registry hashes it, looks it up by primary key in LiteLLM's key table (active, not blocked, not expired), and stores only `sha256(key)`, the form LiteLLM gives plugins. A session belongs to the key that first reported it, and the plugin only tags calls from that key, so a report can only ever attribute the reporter's own calls. The master key isn't a virtual key, so its sessions aren't attributed and the hook says so. The registry needs `SELECT` on `LiteLLM_VerificationToken` and its own `tpt_sessions` table; in production give it a role with only that.
 - **The registry URL comes from trusted config.** `TPT_REGISTRY_URL` belongs in the user's or the organization's Claude Code settings. A repo's `automation.registry_url` is only used on the same host as the user's own `ANTHROPIC_BASE_URL`.
 - **Which code the hooks run.** Once a clone is set up, the Claude Code hooks and the git hook run a copy of the CLI in `.git/tokens-per-ticket/`, not the checkout's `.tokens-per-ticket/tpt.mjs`. A branch that swaps the bundle changes nothing that runs; only an explicit `tpt init` replaces the copy, and the session hook reports when a branch carries a different one. A branch can still change `.claude/settings.json` itself, which is [Claude Code's trust model](https://code.claude.com/docs/en/permissions) for any project hook: review changes to `.claude/` like any other code.
 
