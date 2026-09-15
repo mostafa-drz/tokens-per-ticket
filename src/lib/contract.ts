@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
@@ -56,6 +56,16 @@ export function parseContract(source: string): TicketContract {
 
 export function loadContract(root: string = process.cwd()): TicketContract {
   return parseContract(readFileSync(path.join(root, CONTRACT_FILE), "utf8"));
+}
+
+/**
+ * The contract from the first of these checkouts that has one: the current
+ * checkout, then the main one. During rollout the main checkout may still be
+ * on a branch from before adoption. Null when none has it.
+ */
+export function loadFirstContract(roots: (string | null | undefined)[]): TicketContract | null {
+  const root = roots.find((dir): dir is string => Boolean(dir) && existsSync(path.join(dir!, CONTRACT_FILE)));
+  return root ? loadContract(root) : null;
 }
 
 /** Normalizes user input like "eng-123" to "ENG-123", or returns null. */

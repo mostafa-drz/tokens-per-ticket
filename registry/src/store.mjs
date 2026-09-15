@@ -30,7 +30,7 @@ export function memoryStore({ tokens = null } = {}) {
  * result, which drops tables it doesn't know
  * (litellm_proxy_extras/utils.py, _resolve_all_migrations, v1.100.1).
  */
-export async function postgresStore(pool, { schema = "tpt", retentionDays = 90, cacheMs = 60_000 } = {}) {
+export async function postgresStore(pool, { schema = "tpt", retentionDays = 90, cacheMs = 10_000 } = {}) {
   if (!/^[a-z_][a-z0-9_]*$/.test(schema)) throw new Error(`Invalid schema name: ${schema}`);
   const TABLE = `${schema}.sessions`;
   const DDL = `

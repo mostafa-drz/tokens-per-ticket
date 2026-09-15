@@ -8,7 +8,7 @@
  * Without a key, reads it from the current branch.
  */
 import { parseArgs } from "node:util";
-import { CONTRACT_FILE, findTicketKey, loadContract, normalizeTicketKey, ticketTag } from "../lib/contract.ts";
+import { CONTRACT_FILE, findTicketKey, loadFirstContract, normalizeTicketKey, ticketTag } from "../lib/contract.ts";
 import { loadEnvLocal } from "../lib/env.ts";
 import { currentBranch, mainCheckoutRoot, tryGit } from "../lib/git.ts";
 import { summarizeTicket } from "../lib/ledger.ts";
@@ -56,8 +56,10 @@ export async function runReport(argv: string[]): Promise<void> {
 
   const mainRoot = mainCheckoutRoot();
   // Ticket worktrees have no .env.local of their own (it's gitignored).
-  loadEnvLocal([tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd(), mainRoot]);
-  const contract = loadContract(mainRoot);
+  const here = tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd();
+  loadEnvLocal([here, mainRoot]);
+  const contract =
+    loadFirstContract([here, mainRoot]) ?? fail(`No ${CONTRACT_FILE} in this checkout. Run this on a branch that has adopted tokens-per-ticket.`);
   const branch = values.branch ?? currentBranch();
   const key = positionals[0]
     ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key${contract.key.teams.length ? ` for teams ${contract.key.teams.join(", ")} (key.teams in ${CONTRACT_FILE})` : ""}.`))

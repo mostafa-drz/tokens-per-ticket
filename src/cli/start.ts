@@ -16,7 +16,8 @@ import { parseArgs } from "node:util";
 import {
   branchName,
   findTicketKey,
-  loadContract,
+  CONTRACT_FILE,
+  loadFirstContract,
   normalizeTicketKey,
   worktreePath,
 } from "../lib/contract.ts";
@@ -55,7 +56,8 @@ export async function runStart(argv: string[]): Promise<void> {
 
   const repoRoot = tryGit(["rev-parse", "--show-toplevel"]) ?? fail("Run this inside the repository.");
   const mainRoot = mainCheckoutRoot(repoRoot);
-  const contract = loadContract(mainRoot);
+  const contract =
+    loadFirstContract([repoRoot, mainRoot]) ?? fail(`No ${CONTRACT_FILE} in this checkout. Run this on a branch that has adopted tokens-per-ticket.`);
 
   const key =
     normalizeTicketKey(positionals[0], contract) ??
@@ -100,7 +102,8 @@ export async function runStart(argv: string[]): Promise<void> {
       console.log(`✓ Using existing branch ${branch}`);
     } else {
       git(["worktree", "add", "-b", branch, worktree, values.base ?? "HEAD"], mainRoot);
-      console.log(`✓ Created ${branch}`);
+      const base = values.base ?? `${tryGit(["branch", "--show-current"], mainRoot) || "HEAD"} (the main checkout; pass --base to choose)`;
+      console.log(`✓ Created ${branch} from ${base}`);
     }
     console.log(`✓ Worktree ${worktree}`);
     console.log("  Install the project's dependencies there before running its app or tests.");
