@@ -1,6 +1,6 @@
 /**
  * The LEDGER_BASIC_AUTH check, shared by src/proxy.ts, the server-side data
- * access in data.ts, and the review Server Action.
+ * access in data.ts.
  *
  * Next.js 16 says Proxy is for optimistic checks and "should not be used as a
  * full session management or authorization solution", and that Server Actions

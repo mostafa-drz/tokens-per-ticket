@@ -16,7 +16,7 @@ export const SAMPLE_TICKETS: { key: string; title: string; days: number; weight:
   { key: "TPT-15", title: "Post the report as one Linear comment", days: 2, weight: 1.1, cache: 0.55 },
   { key: "TPT-17", title: "ticket:start worktree launcher", days: 4, weight: 1.9, cache: 0.47 },
   { key: "TPT-18", title: "SessionStart ticket guard hook", days: 1, weight: 0.5, cache: 0.71 },
-  { key: "TPT-21", title: "AI spend review on the ticket page", days: 2, weight: 0.9, cache: 0.39 },
+  { key: "TPT-21", title: "Spend chart on the ticket page", days: 2, weight: 0.9, cache: 0.39 },
   { key: "TPT-9", title: "Local LiteLLM gateway with Postgres", days: 2, weight: 0.7, cache: 0.66 },
 ];
 

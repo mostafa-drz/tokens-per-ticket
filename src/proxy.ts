@@ -6,7 +6,7 @@ import { basicAuthOk } from "./lib/basic-auth";
  * page and server action asks for it. Required before deploying with
  * LEDGER_DATA=litellm, since the ledger shows organization-wide spend.
  *
- * This is the first line only: data.ts and the review action check the same
+ * This is the first line only: data.ts checks the same
  * header again before they use the gateway key (src/lib/basic-auth.ts).
  *
  * Basic auth is deliberately small. Put the app behind your SSO (for example

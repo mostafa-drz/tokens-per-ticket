@@ -7,9 +7,7 @@ import { getTicket, parseRange } from "@/lib/data";
 import { formatDay, formatPercent, formatTokens, formatUsd } from "@/lib/format";
 import { cacheReadShare } from "@/lib/ledger";
 import { renderReport } from "@/lib/report";
-import { reviewModel } from "@/lib/review";
 import { DailySpendChart } from "./daily-spend-chart";
-import { ReviewPanel } from "./review-panel";
 
 export async function generateMetadata({ params }: PageProps<"/tickets/[key]">): Promise<Metadata> {
   return { title: (await params).key.toUpperCase() };
@@ -85,8 +83,6 @@ export default async function TicketPage({ params, searchParams }: PageProps<"/t
               ))}
             </ul>
           </section>
-
-          <ReviewPanel ticketKey={key} days={days} enabled={reviewModel() !== null} />
 
           <section className="flex flex-col gap-3">
             <h2 className="text-sm font-medium text-ink-soft">

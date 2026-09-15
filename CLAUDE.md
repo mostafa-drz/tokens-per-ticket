@@ -38,8 +38,8 @@ pnpm build:cli      # rebuild .tokens-per-ticket/tpt.mjs
   hard-coded. It all goes through `tokens-per-ticket.yaml` and `src/lib/contract.ts`.
 - **Never switch branches in a checkout that has uncommitted changes.** Use a worktree
   (`pnpm tpt start <KEY>`) to work a second ticket.
-- **Keep `src/lib` and `src/cli` free of Next.js imports**, except `src/lib/data.ts` and
-  `src/lib/review.ts`. They are bundled into the CLI.
+- **Keep `src/lib` and `src/cli` free of Next.js imports**, except `src/lib/data.ts`. They are
+  bundled into the CLI.
 - **Never sum a day's top-level metrics across tags.** One request carries several tags
   (LiteLLM adds `User-Agent` tags). Read `breakdown.entities` for the ticket list, and the
   one-tag query for a ticket's detail. `tests/unit/ledger.test.ts` guards this.

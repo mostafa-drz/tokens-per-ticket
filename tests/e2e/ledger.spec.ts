@@ -45,12 +45,6 @@ test("the range picker changes the window and marks the current choice", async (
   await expect(range.getByRole("link", { name: "7 days" })).toHaveAttribute("aria-current", "page");
 });
 
-test("AI review explains itself when the deployment has no review model", async ({ page }) => {
-  await page.goto("/tickets/TPT-23");
-  await expect(page.getByRole("button", { name: "Review spend" })).toBeDisabled();
-  await expect(page.getByText(/Set LEDGER_REVIEW_MODEL/)).toBeVisible();
-});
-
 test("a ticket with no spend says what to check", async ({ page }) => {
   await page.goto("/tickets/TPT-999");
   await expect(page.getByText("No spend recorded for TPT-999 in this range")).toBeVisible();
