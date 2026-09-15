@@ -28,7 +28,7 @@ pnpm build:cli      # rebuild .tokens-per-ticket/tpt.mjs
   check the LiteLLM docs and source. Add code here only for the gaps: contract, session hooks,
   registry, gateway plugin, Linear write-back, ledger UI.
 - **Automatic first.** Engineers shouldn't have to run a command for attribution. Anything new
-  should work from the hooks, the registry, and the gateway plugin; `tpt start` stays optional.
+  should work from the hooks, the registry, and the gateway plugin.
 - **Hooks never block and never fail a session.** Every path of `src/cli/hook.ts` returns output,
   warns at most once per problem, and the gateway plugin fails open.
 - **Rebuild the bundle.** `.tokens-per-ticket/tpt.mjs` is generated from `src/cli` and `src/lib`
@@ -37,7 +37,7 @@ pnpm build:cli      # rebuild .tokens-per-ticket/tpt.mjs
 - **The contract is config.** Nothing about branch shape, team keys, or the tracker is
   hard-coded. It all goes through `tokens-per-ticket.yaml` and `src/lib/contract.ts`.
 - **Never switch branches in a checkout that has uncommitted changes.** Use a worktree
-  (`pnpm tpt start <KEY>`) to work a second ticket.
+  (`git worktree add`) to work a second ticket.
 - **Keep `src/lib` and `src/cli` free of Next.js imports**, except `src/lib/data.ts`. They are
   bundled into the CLI.
 - **Never sum a day's top-level metrics across tags.** One request carries several tags

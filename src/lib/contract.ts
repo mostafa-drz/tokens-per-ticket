@@ -27,9 +27,6 @@ const ContractSchema = z.object({
         message: "branch.template must contain {key} or {KEY}",
       }),
   }),
-  worktree: z.object({
-    path: z.string().min(1),
-  }),
   // Automatic attribution: Claude Code hooks report which ticket each session
   // is on, and the gateway tags every call. No command for engineers to run.
   automation: z
@@ -90,9 +87,6 @@ export function findTicketKey(branch: string, contract: TicketContract): string 
   return match ? normalizeTicketKey(match[1], contract) : null;
 }
 
-/** The optional slug and the one separator character in front of it. */
-const SLUG_WITH_SEPARATOR = /[-_./]?\{slug\}/g;
-
 function branchPattern(contract: TicketContract): RegExp {
   const source = contract.branch.template
     .split(/(\{user\}|\{key\}|\{KEY\}|[-_./]?\{slug\})/)
@@ -124,43 +118,6 @@ export function ticketTag(key: string): string {
 export function keyFromTag(tag: string, contract: TicketContract): string | null {
   if (!tag.startsWith(TAG_PREFIX)) return null;
   return normalizeTicketKey(tag.slice(TAG_PREFIX.length), contract);
-}
-
-export function slugify(text: string, maxLength = 40): string {
-  return text
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, maxLength)
-    .replace(/-+$/g, "");
-}
-
-export function branchName(
-  input: { user: string; key: string; slug: string },
-  contract: TicketContract,
-): string {
-  const slug = slugify(input.slug);
-  return (
-    contract.branch.template
-      // Without a title, drop the slug together with its separator, whatever
-      // it is ("-", "_", ".", "/"). Leaving "feature/proj-42_" behind would
-      // create a branch that findTicketKey can't read back.
-      .replace(SLUG_WITH_SEPARATOR, (part) => (slug ? part.replace("{slug}", slug) : ""))
-      .replaceAll("{user}", slugify(input.user))
-      .replaceAll("{key}", input.key.toLowerCase())
-      .replaceAll("{KEY}", input.key)
-  );
-}
-
-export function worktreePath(
-  input: { repoRoot: string; branch: string },
-  contract: TicketContract,
-): string {
-  const relative = contract.worktree.path
-    .replaceAll("{repo}", path.basename(input.repoRoot))
-    .replaceAll("{branch}", input.branch.replaceAll("/", "__"));
-  return path.resolve(input.repoRoot, relative);
 }
 
 function isAllowedTeam(key: string, contract: TicketContract): boolean {

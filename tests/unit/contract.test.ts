@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  branchName,
   findTicketKey,
   keyFromTag,
   loadContract,
   normalizeTicketKey,
   parseContract,
   ticketTag,
-  worktreePath,
 } from "../../src/lib/contract.ts";
 
 const contract = loadContract();
@@ -39,7 +37,6 @@ describe("findTicketKey", () => {
     const jira = parseContract(`
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
 branch: { template: "feature/{key}_{slug}" }
-worktree: { path: "../{repo}.worktrees/{branch}" }
 `);
     assert.equal(findTicketKey("feature/PROJ-42_login", jira), "PROJ-42");
     assert.equal(findTicketKey("mostafa/proj-42-login", jira), null);
@@ -49,7 +46,6 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
     const scoped = parseContract(`
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+", teams: [AIS] }
 branch: { template: "{user}/{key}-{slug}" }
-worktree: { path: "../{repo}.worktrees/{branch}" }
 `);
     assert.equal(findTicketKey("mostafa/eng-123-x", scoped), null);
     assert.equal(findTicketKey("mostafa/ais-123-x", scoped), "AIS-123");
@@ -75,43 +71,13 @@ describe("naming", () => {
     assert.equal(normalizeTicketKey("not a key", contract), null);
   });
 
-  it("builds a branch from the template", () => {
-    assert.equal(
-      branchName({ user: "Mostafa D", key: "ENG-123", slug: "Checkout flow: retries!" }, contract),
-      "mostafa-d/eng-123-checkout-flow-retries",
-    );
-  });
-
-  it("keeps the branch valid when the slug is empty", () => {
-    assert.equal(branchName({ user: "mostafa", key: "ENG-9", slug: "" }, contract), "mostafa/eng-9");
-  });
-
-  it("drops the slug separator too when a custom template has no title", () => {
-    const jira = parseContract(`
-key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
-branch: { template: "feature/{key}_{slug}" }
-worktree: { path: "../{repo}.worktrees/{branch}" }
-`);
-    const branch = branchName({ user: "mostafa", key: "PROJ-43", slug: "" }, jira);
-    assert.equal(branch, "feature/proj-43");
-    assert.equal(findTicketKey(branch, jira), "PROJ-43");
-    assert.equal(branchName({ user: "mostafa", key: "PROJ-43", slug: "Login page" }, jira), "feature/proj-43_login-page");
-  });
-
-  it("keeps the key as printed with {KEY}, for trackers such as Jira", () => {
+  it("reads the key back with {KEY}, as trackers such as Jira print it, and typed by hand", () => {
     const jira = parseContract(`
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
 branch: { template: "feature/{KEY}_{slug}" }
-worktree: { path: "../{repo}.worktrees/{branch}" }
 `);
-    const branch = branchName({ user: "mostafa", key: "PROJ-42", slug: "Short title" }, jira);
-    assert.equal(branch, "feature/PROJ-42_short-title");
-    assert.equal(findTicketKey(branch, jira), "PROJ-42");
+    assert.equal(findTicketKey("feature/PROJ-42_short-title", jira), "PROJ-42");
     assert.equal(findTicketKey("feature/proj-42_typed-by-hand", jira), "PROJ-42");
-    assert.equal(
-      worktreePath({ repoRoot: "/work/app", branch }, jira),
-      "/work/app.worktrees/feature__PROJ-42_short-title",
-    );
   });
 
   it("rejects a template without a key placeholder", () => {
@@ -119,15 +85,7 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
       parseContract(`
 key: { pattern: "[A-Z]+-[0-9]+" }
 branch: { template: "feature/{slug}" }
-worktree: { path: "../{repo}.worktrees/{branch}" }
 `),
-    );
-  });
-
-  it("places worktrees next to the repo, one folder per branch", () => {
-    assert.equal(
-      worktreePath({ repoRoot: "/work/tokens-per-ticket", branch: "mostafa/eng-9" }, contract),
-      "/work/tokens-per-ticket.worktrees/mostafa__eng-9",
     );
   });
 });
@@ -136,7 +94,6 @@ describe("automation settings", () => {
   const base = `
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
 branch: { template: "{user}/{key}-{slug}" }
-worktree: { path: "../{repo}.worktrees/{branch}" }
 `;
 
   it("turns session tracking and the commit trailer on when the section is missing", () => {

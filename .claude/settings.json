@@ -5,8 +5,7 @@
       "Bash(pnpm test:unit)",
       "Bash(pnpm typecheck)",
       "Bash(pnpm lint)",
-      "Bash(node .tokens-per-ticket/tpt.mjs report *)",
-      "Bash(node .tokens-per-ticket/tpt.mjs start *)"
+      "Bash(node .tokens-per-ticket/tpt.mjs report *)"
     ]
   },
   "hooks": {

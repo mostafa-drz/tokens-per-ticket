@@ -15,19 +15,13 @@ key:
   teams: []
 
 branch:
-  # Used by `tpt start` to name new branches.
+  # How branches name tickets; the hooks read the key back from it.
   # {user} = git user slug, {key} = lowercased ticket key, {KEY} = ticket key
   # as printed (use it for Jira, which only links uppercase keys),
   # {slug} = short title (optional; dropped with its separator when empty).
   # The default matches Linear's "Copy git branch name" format.
   # Jira-style example: "feature/{KEY}_{slug}" -> feature/PROJ-42_short-title
   template: "{user}/{key}-{slug}"
-
-
-worktree:
-  # One worktree per ticket keeps one Claude Code session on one ticket.
-  # {repo} = this repository's folder name, {branch} = branch with / -> __
-  path: "../{repo}.worktrees/{branch}"
 
 automation:
   # Claude Code hooks tell the session registry which branch (and ticket) each

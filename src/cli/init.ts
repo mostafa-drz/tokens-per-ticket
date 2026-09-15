@@ -14,7 +14,7 @@ import { hookSettings } from "./hook.ts";
  *   1. tokens-per-ticket.yaml, unless the repo already has one
  *   2. .tokens-per-ticket/tpt.mjs, this CLI as one file with no dependencies
  *   3. hooks and permissions merged into .claude/settings.json (nothing removed)
- *   4. /ticket-cost and /ticket-start skills
+ *   4. the /ticket-cost skill
  *   5. the prepare-commit-msg hook for the commit trailer
  *   6. .env.local in .gitignore: `tpt report` reads an org-wide spend key from it
  *
@@ -187,7 +187,7 @@ export function mergeHookSettings(settings: Settings): string[] {
   }
   settings.permissions ??= {};
   settings.permissions.allow ??= [];
-  for (const rule of [`Bash(node ${BUNDLE_PATH} report *)`, `Bash(node ${BUNDLE_PATH} start *)`]) {
+  for (const rule of [`Bash(node ${BUNDLE_PATH} report *)`]) {
     if (!settings.permissions.allow.includes(rule)) {
       settings.permissions.allow.push(rule);
       added.push(`permission ${rule}`);
@@ -213,21 +213,5 @@ allowed-tools: Bash(node ${BUNDLE_PATH} report *)
    (model mix on routine work, low prompt-cache share, failed requests, many active days).
 
 The number is a signal to talk about, not a score.
-`,
-  "ticket-start": `---
-name: ticket-start
-description: Prepare a separate worktree for a ticket and give the user the command that starts a Claude Code session in it. Only needed to work two tickets side by side; on a ticket branch, spend is attributed automatically.
-argument-hint: "<TICKET-KEY> [short title]"
-disable-model-invocation: true
-allowed-tools: Bash(node ${BUNDLE_PATH} start *)
----
-
-# Start a ticket in its own worktree
-
-1. Run \`node ${BUNDLE_PATH} start $ARGUMENTS --print\`.
-2. If it fails, relay the error as is.
-3. Otherwise tell the user which branch and worktree are ready, and that they can open a new terminal and paste the printed command.
-
-Don't run the printed \`claude\` command yourself.
 `,
 };

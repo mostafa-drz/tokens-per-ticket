@@ -20,7 +20,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:unit
       - name: The CLI entry points start
-        run: pnpm -s tpt help && pnpm -s tpt report --help && pnpm -s tpt start --help
+        run: pnpm -s tpt help && pnpm -s tpt report --help
       - run: pnpm test:registry
       - run: pnpm test:gateway
       - name: The committed CLI bundle matches the source

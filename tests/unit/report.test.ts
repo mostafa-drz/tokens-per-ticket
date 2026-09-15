@@ -1,39 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseContract } from "../../src/lib/contract.ts";
-import { claudeArgs, shellCommand, ticketBranches } from "../../src/lib/launch.ts";
 import type { TicketDetail } from "../../src/lib/ledger.ts";
 import { upsertJiraReport } from "../../src/lib/jira.ts";
 import { upsertLinearReport } from "../../src/lib/linear.ts";
 import { reportPoster } from "../../src/lib/post.ts";
 import { REPORT_SIGNATURE, renderReport } from "../../src/lib/report.ts";
-
-describe("ticketBranches", () => {
-  const jira = parseContract(`
-key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
-branch: { template: "feature/{KEY}_{slug}" }
-worktree: { path: "../{repo}.worktrees/{branch}" }
-`);
-
-  it("finds a branch someone already made for the ticket, whatever its title", () => {
-    const branches = ["main", "feature/PROJ-42_login", "feature/PROJ-420_other", "dependabot/npm_and_yarn/proj-42"];
-    assert.deepEqual(ticketBranches(branches, "PROJ-42", jira), ["feature/PROJ-42_login"]);
-    assert.deepEqual(ticketBranches(branches, "PROJ-7", jira), []);
-  });
-});
-
-describe("claudeArgs", () => {
-  it("only names the session: the branch and the gateway do the attribution", () => {
-    assert.deepEqual(claudeArgs({ key: "ENG-1" }), ["--name", "ENG-1"]);
-  });
-
-  it("prints a command that survives a shell", () => {
-    assert.equal(
-      shellCommand("claude", ["--settings", `{"a":"it's"}`]),
-      `claude --settings '{"a":"it'\\''s"}'`,
-    );
-  });
-});
 
 describe("renderReport", () => {
   const detail: TicketDetail = {
