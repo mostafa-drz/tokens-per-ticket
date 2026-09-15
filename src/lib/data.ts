@@ -81,7 +81,7 @@ export async function getTicket(
   days: RangeDays,
 ): Promise<{ detail: (TicketDetail & { title?: string }) | null; tag: string; range: ReturnType<typeof lastDays> }> {
   const range = lastDays(days);
-  const tag = ticketTag(key, contract());
+  const tag = ticketTag(key);
   const detail = summarizeTicket(key, await activity({ tags: [tag], ...range }));
   return { detail: detail && { ...detail, title: titleFor(key) }, tag, range };
 }

@@ -27,9 +27,6 @@ const ContractSchema = z.object({
         message: "branch.template must contain {key} or {KEY}",
       }),
   }),
-  tag: z.object({
-    prefix: z.string().min(1),
-  }),
   worktree: z.object({
     path: z.string().min(1),
   }),
@@ -103,14 +100,20 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function ticketTag(key: string, contract: TicketContract): string {
-  return `${contract.tag.prefix}${key}`;
+/**
+ * Fixed, not configurable: the gateway plugin sets and refuses tags with this
+ * prefix, and two settings for one value would drift.
+ */
+export const TAG_PREFIX = "ticket:";
+
+export function ticketTag(key: string): string {
+  return `${TAG_PREFIX}${key}`;
 }
 
 /** Reverse of ticketTag. Returns null for tags that aren't ticket tags. */
 export function keyFromTag(tag: string, contract: TicketContract): string | null {
-  if (!tag.startsWith(contract.tag.prefix)) return null;
-  return normalizeTicketKey(tag.slice(contract.tag.prefix.length), contract);
+  if (!tag.startsWith(TAG_PREFIX)) return null;
+  return normalizeTicketKey(tag.slice(TAG_PREFIX.length), contract);
 }
 
 export function slugify(text: string, maxLength = 40): string {

@@ -273,8 +273,6 @@ key:
   teams: []                           # optional allowlist, e.g. [ENG, AIS]
 branch:
   template: "{user}/{key}-{slug}"     # Linear's default "Copy git branch name"; {user}, {key}, {KEY}, {slug}
-tag:
-  prefix: "ticket:"                   # the gateway plugin's TPT_TAG_PREFIX must match
 worktree:
   path: "../{repo}.worktrees/{branch}"
 automation:

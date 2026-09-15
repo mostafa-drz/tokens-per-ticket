@@ -39,7 +39,6 @@ describe("findTicketKey", () => {
     const jira = parseContract(`
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
 branch: { template: "feature/{key}_{slug}" }
-tag: { prefix: "ticket:" }
 worktree: { path: "../{repo}.worktrees/{branch}" }
 `);
     assert.equal(findTicketKey("feature/PROJ-42_login", jira), "PROJ-42");
@@ -50,7 +49,6 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
     const scoped = parseContract(`
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+", teams: [AIS] }
 branch: { template: "{user}/{key}-{slug}" }
-tag: { prefix: "ticket:" }
 worktree: { path: "../{repo}.worktrees/{branch}" }
 `);
     assert.equal(findTicketKey("mostafa/eng-123-x", scoped), null);
@@ -60,7 +58,7 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
 
 describe("tags", () => {
   it("round-trips a ticket key through its spend tag", () => {
-    const tag = ticketTag("ENG-123", contract);
+    const tag = ticketTag("ENG-123");
     assert.equal(tag, "ticket:ENG-123");
     assert.equal(keyFromTag(tag, contract), "ENG-123");
   });
@@ -92,7 +90,6 @@ describe("naming", () => {
     const jira = parseContract(`
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
 branch: { template: "feature/{key}_{slug}" }
-tag: { prefix: "ticket:" }
 worktree: { path: "../{repo}.worktrees/{branch}" }
 `);
     const branch = branchName({ user: "mostafa", key: "PROJ-43", slug: "" }, jira);
@@ -105,7 +102,6 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
     const jira = parseContract(`
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
 branch: { template: "feature/{KEY}_{slug}" }
-tag: { prefix: "ticket:" }
 worktree: { path: "../{repo}.worktrees/{branch}" }
 `);
     const branch = branchName({ user: "mostafa", key: "PROJ-42", slug: "Short title" }, jira);
@@ -123,7 +119,6 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
       parseContract(`
 key: { pattern: "[A-Z]+-[0-9]+" }
 branch: { template: "feature/{slug}" }
-tag: { prefix: "ticket:" }
 worktree: { path: "../{repo}.worktrees/{branch}" }
 `),
     );
@@ -141,7 +136,6 @@ describe("automation settings", () => {
   const base = `
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
 branch: { template: "{user}/{key}-{slug}" }
-tag: { prefix: "ticket:" }
 worktree: { path: "../{repo}.worktrees/{branch}" }
 `;
 

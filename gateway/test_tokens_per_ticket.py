@@ -108,13 +108,20 @@ class SessionTicketTaggerTest(unittest.TestCase):
             self.assertIn("set by the gateway", result)
 
     def test_refuses_pass_through_calls_unless_allowed(self):
-        data = {"model": "claude-sonnet-5", "messages": []}
+        data = {"model": "claude-sonnet-5", "messages": [], "metadata": {"tags": ["ticket:ENG-78", "team:web"]}}
         result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, data, "pass_through_endpoint"))
         self.assertIn("pass-through routes are off", result)
+        # The refused call isn't logged under the ticket it named.
+        self.assertEqual(data["metadata"]["tags"], ["team:web"])
         self.plugin.allow_pass_through = True
         self.plugin._client = _Client({})
         result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, data, "pass_through_endpoint"))
         self.assertIs(result, data)
+
+    def test_refuses_client_ticket_tags_even_without_registry_settings(self):
+        self.plugin.registry_url = ""
+        result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, request(tags=["ticket:ENG-9"]), "anthropic_messages"))
+        self.assertIsInstance(result, str)
 
     def test_other_client_tags_are_fine(self):
         tags, _ = self.run_hook(self.jane_token, request(tags=["team:web"]), {"s1": {"ticket": "ENG-1", "key_token": self.jane_token}})

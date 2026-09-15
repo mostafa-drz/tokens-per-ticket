@@ -83,7 +83,7 @@ function sampleRows(contract: TicketContract, now: Date): Row[] {
           completion * model.outRate;
         rows.push({
           date: isoDate(date),
-          tag: ticketTag(ticket.key, contract),
+          tag: ticketTag(ticket.key),
           model: model.name,
           metrics: {
             spend,

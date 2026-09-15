@@ -10,8 +10,9 @@ reads per-tag spend (the ledger, reports, LiteLLM's own tag reports) works
 unchanged. Subagents share their session's id, so they count toward its ticket.
 
 Rules:
-- Only the registry sets tickets. With the plugin on, a request that sets its
-  own `ticket:` tag (header or body) is refused with a clear error. A key can
+- Only the registry sets tickets. A request that sets its own `ticket:` tag
+  (header or body) is refused with a clear error, even while the registry
+  settings are missing. A key can
   still report its own session on any ticket, as it could by naming a branch:
   attribution is for visibility, not billing enforcement.
 - Pass-through routes (/anthropic/*, /vertex_ai/*, ...) give this hook no
@@ -50,6 +51,8 @@ SESSION_HEADER = "x-claude-code-session-id"
 # is never looked up, so a junk header can't make the registry look unhealthy.
 SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 TAGS_HEADER = "x-litellm-tags"
+# Fixed, matching src/lib/contract.ts TAG_PREFIX.
+TAG_PREFIX = "ticket:"
 
 
 class SessionTicketTagger(CustomLogger):
@@ -57,7 +60,7 @@ class SessionTicketTagger(CustomLogger):
         super().__init__()
         self.registry_url = os.environ.get("TPT_REGISTRY_URL", "").rstrip("/")
         self.registry_token = os.environ.get("TPT_REGISTRY_TOKEN", "")
-        self.tag_prefix = os.environ.get("TPT_TAG_PREFIX", "ticket:")
+        self.tag_prefix = TAG_PREFIX
         self.allow_pass_through = os.environ.get("TPT_ALLOW_PASS_THROUGH", "").lower() in ("1", "true", "yes")
         # A branch switch shows up within this many seconds.
         self.cache_seconds = float(os.environ.get("TPT_CACHE_SECONDS", "2"))
@@ -70,27 +73,32 @@ class SessionTicketTagger(CustomLogger):
         self._skip_until = 0.0
         self._client: httpx.AsyncClient | None = None
 
+        if not self.enabled:
+            verbose_proxy_logger.error(
+                "tokens_per_ticket: TPT_REGISTRY_URL and TPT_REGISTRY_TOKEN aren't both set, so no call is tagged. Client ticket tags are still refused."
+            )
+
     @property
     def enabled(self) -> bool:
         return bool(self.registry_url and self.registry_token)
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
-        if not self.enabled:
-            return data
         if call_type == "pass_through_endpoint" and not self.allow_pass_through:
+            self._strip_ticket_tags(data)
             return (
                 "tokens-per-ticket: pass-through routes are off on this gateway because their spend tags can't be verified. "
                 "Use /v1/messages (as Claude Code does), or set TPT_ALLOW_PASS_THROUGH=true and restrict developer keys with allowed_routes."
             )
         if self._client_ticket_tags(data):
             # Keep the refused request from being logged under the claimed ticket.
-            for tags in self._tag_lists(data):
-                tags[:] = [tag for tag in tags if not self._is_ticket_tag(tag)]
+            self._strip_ticket_tags(data)
             # A string return makes LiteLLM refuse the request with this message.
             return (
                 f"tokens-per-ticket: '{self.tag_prefix}' tags are set by the gateway from the session registry. "
                 "Remove them from x-litellm-tags or the request body; the ticket follows your branch automatically."
             )
+        if not self.enabled:
+            return data
         try:
             await self._tag(user_api_key_dict, data)
         except Exception as error:  # never fail a model call over attribution
@@ -117,6 +125,10 @@ class SessionTicketTagger(CustomLogger):
         for tags in self._tag_lists(data):
             if ticket_tag not in tags:
                 tags.append(ticket_tag)
+
+    def _strip_ticket_tags(self, data: dict) -> None:
+        for tags in self._tag_lists(data):
+            tags[:] = [tag for tag in tags if not self._is_ticket_tag(tag)]
 
     def _is_ticket_tag(self, tag) -> bool:
         # LiteLLM trims header tags but not body tags; compare the way people read them.

@@ -12,7 +12,6 @@ describe("ticketBranches", () => {
   const jira = parseContract(`
 key: { pattern: "[A-Z][A-Z0-9]*-[0-9]+" }
 branch: { template: "feature/{KEY}_{slug}" }
-tag: { prefix: "ticket:" }
 worktree: { path: "../{repo}.worktrees/{branch}" }
 `);
 

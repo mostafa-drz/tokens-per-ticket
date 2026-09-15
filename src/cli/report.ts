@@ -90,7 +90,7 @@ export async function runReport(argv: string[]): Promise<void> {
   }
   const baseUrl = process.env.LITELLM_BASE_URL || "http://localhost:4000";
 
-  const tag = ticketTag(key, contract);
+  const tag = ticketTag(key);
   const range = lastDays(days);
 
   try {
