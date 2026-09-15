@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { loadContract } from "../../src/lib/contract.ts";
 import { cacheReadShare, claudeCodeUsage, summarizeTicket, summarizeTickets } from "../../src/lib/ledger.ts";
-import { datesBetween, fetchTagActivity, lastDays, LiteLLMError, mergeDays, PAGE_SIZE, type DailySpend } from "../../src/lib/litellm.ts";
+import { datesBetween, fetchTagActivity, parseActivityPage, lastDays, LiteLLMError, mergeDays, PAGE_SIZE, type DailySpend } from "../../src/lib/litellm.ts";
 
 const contract = loadContract();
 
@@ -101,6 +101,15 @@ describe("fetchTagActivity", () => {
     const [row] = summarizeTickets(days, contract);
     assert.equal(row.activeDays, 2);
     assert.equal(row.spend, 7);
+  });
+
+  it("fills missing metrics with zero and refuses a response without results", () => {
+    const page = parseActivityPage({ results: [{ date: "2026-09-14", metrics: { spend: 2 }, breakdown: { entities: { "ticket:ENG-1": {} } } }] });
+    assert.equal(page.results[0].metrics.spend, 2);
+    assert.equal(page.results[0].metrics.api_requests, 0);
+    assert.equal(page.results[0].breakdown.entities["ticket:ENG-1"].metrics.spend, 0);
+    assert.equal(page.metadata.has_more, false);
+    assert.throws(() => parseActivityPage({ detail: "Not found" }), /unexpected/);
   });
 
   it("lists dates newest first and refuses more than a year", () => {

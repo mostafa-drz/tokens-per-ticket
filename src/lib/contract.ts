@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
-import { z } from "zod";
 
 /**
  * The ticket contract (tokens-per-ticket.yaml): branch name -> ticket key ->
@@ -11,44 +10,85 @@ import { z } from "zod";
  * and the app all share one implementation.
  */
 
-const ContractSchema = z.object({
-  tracker: z.string().default("linear"),
-  key: z.object({
-    pattern: z.string().min(1),
-    teams: z.array(z.string()).default([]),
-  }),
-  branch: z.object({
-    // {key} writes the key lowercased (Linear's default), {KEY} as the tracker
-    // prints it. Jira only links branches whose key is uppercase:
-    // https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/
-    template: z
-      .string()
-      .refine((template) => template.includes("{key}") || template.includes("{KEY}"), {
-        message: "branch.template must contain {key} or {KEY}",
-      }),
-  }),
-  // Automatic attribution: Claude Code hooks report which ticket each session
-  // is on, and the gateway tags every call. No command for engineers to run.
-  automation: z
-    .object({
-      sessions: z.boolean().default(true),
-      // The session registry that runs next to LiteLLM. TPT_REGISTRY_URL overrides it.
-      registry_url: z.string().url().optional(),
-      // Git trailer added to commits on ticket branches, or false for none.
-      commit_trailer: z.union([z.string().regex(/^[A-Za-z][A-Za-z0-9-]*$/), z.literal(false)]).default("Ticket"),
-      // Where engineers read spend. `tpt report` and /ticket-cost point here when
-      // the machine has no spend-reading key (which belongs in CI, not on laptops).
-      ledger_url: z.string().url().optional(),
-    })
-    .prefault({}),
-});
-
-export type TicketContract = z.infer<typeof ContractSchema>;
+export type TicketContract = {
+  tracker: string;
+  key: { pattern: string; teams: string[] };
+  /**
+   * {key} writes the key lowercased (Linear's default), {KEY} as the tracker
+   * prints it. Jira only links branches whose key is uppercase:
+   * https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/
+   */
+  branch: { template: string };
+  /**
+   * Automatic attribution: Claude Code hooks report which ticket each session
+   * is on, and the gateway tags every call.
+   */
+  automation: {
+    sessions: boolean;
+    /** The session registry that runs next to LiteLLM. TPT_REGISTRY_URL overrides it. */
+    registry_url?: string;
+    /** Git trailer added to commits on ticket branches, or false for none. */
+    commit_trailer: string | false;
+    /** Where engineers read spend when the machine has no spend-reading key. */
+    ledger_url?: string;
+  };
+};
 
 export const CONTRACT_FILE = "tokens-per-ticket.yaml";
 
 export function parseContract(source: string): TicketContract {
-  return ContractSchema.parse(parse(source));
+  const data = parse(source);
+  const root = record(data, "the file");
+  const key = record(root.key, "key");
+  const branch = record(root.branch, "branch");
+  const automation = root.automation === undefined || root.automation === null ? {} : record(root.automation, "automation");
+
+  const template = text(branch.template, "branch.template");
+  if (!template.includes("{key}") && !template.includes("{KEY}")) invalid("branch.template must contain {key} or {KEY}");
+  const trailer = automation.commit_trailer ?? "Ticket";
+  if (trailer !== false && (typeof trailer !== "string" || !/^[A-Za-z][A-Za-z0-9-]*$/.test(trailer))) {
+    invalid("automation.commit_trailer must be a trailer name such as Ticket, or false");
+  }
+  const teams = key.teams ?? [];
+  if (!Array.isArray(teams) || teams.some((team) => typeof team !== "string")) invalid("key.teams must be a list of team keys");
+
+  return {
+    tracker: root.tracker === undefined ? "linear" : text(root.tracker, "tracker"),
+    key: { pattern: text(key.pattern, "key.pattern"), teams },
+    branch: { template },
+    automation: {
+      sessions: automation.sessions === undefined ? true : bool(automation.sessions, "automation.sessions"),
+      commit_trailer: trailer as string | false,
+      // Only present when set, like the file.
+      ...optionalUrl(automation.registry_url, "registry_url"),
+      ...optionalUrl(automation.ledger_url, "ledger_url"),
+    },
+  };
+}
+
+function invalid(message: string): never {
+  throw new Error(`${CONTRACT_FILE}: ${message}`);
+}
+
+function record(value: unknown, name: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) invalid(`${name} must be a section`);
+  return value as Record<string, unknown>;
+}
+
+function text(value: unknown, name: string): string {
+  if (typeof value !== "string" || value === "") invalid(`${name} must be a non-empty string`);
+  return value;
+}
+
+function bool(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") invalid(`${name} must be true or false`);
+  return value;
+}
+
+function optionalUrl(value: unknown, name: "registry_url" | "ledger_url"): Partial<Record<typeof name, string>> {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "string" || !URL.canParse(value)) invalid(`automation.${name} must be a URL`);
+  return { [name]: value };
 }
 
 export function loadContract(root: string = process.cwd()): TicketContract {

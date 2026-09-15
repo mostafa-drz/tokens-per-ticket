@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 /**
  * A thin client for the one LiteLLM endpoint this repo needs:
  * GET /tag/daily/activity, backed by the LiteLLM_DailyTagSpend table.
@@ -9,45 +7,75 @@ import { z } from "zod";
  * Unknown fields are ignored, so newer LiteLLM releases don't break parsing.
  */
 
-const Metrics = z.object({
-  spend: z.number().default(0),
-  prompt_tokens: z.number().default(0),
-  completion_tokens: z.number().default(0),
-  cache_read_input_tokens: z.number().default(0),
-  cache_creation_input_tokens: z.number().default(0),
-  total_tokens: z.number().default(0),
-  api_requests: z.number().default(0),
-  successful_requests: z.number().default(0),
-  failed_requests: z.number().default(0),
-});
+export type SpendMetrics = {
+  spend: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  total_tokens: number;
+  api_requests: number;
+  successful_requests: number;
+  failed_requests: number;
+};
 
-const MetricWithMetadata = z.object({ metrics: Metrics });
+export type DailySpend = {
+  date: string;
+  metrics: SpendMetrics;
+  breakdown: {
+    /** Keyed by the model name clients asked for, e.g. "claude-sonnet-5". */
+    model_groups: Record<string, { metrics: SpendMetrics }>;
+    /** Keyed by the tag. */
+    entities: Record<string, { metrics: SpendMetrics }>;
+  };
+};
 
-const DailySpend = z.object({
-  date: z.string(),
-  metrics: Metrics,
-  breakdown: z
-    .object({
-      /** Keyed by the model name clients asked for, e.g. "claude-sonnet-5". */
-      model_groups: z.record(z.string(), MetricWithMetadata).default({}),
-      /** Keyed by the tag. */
-      entities: z.record(z.string(), MetricWithMetadata).default({}),
-    })
-    .default({ model_groups: {}, entities: {} }),
-});
+type ActivityPage = { results: DailySpend[]; metadata: { page: number; has_more: boolean } };
 
-const ActivityPage = z.object({
-  results: z.array(DailySpend),
-  metadata: z
-    .object({
-      page: z.number().default(1),
-      has_more: z.boolean().default(false),
-    })
-    .default({ page: 1, has_more: false }),
-});
+const METRIC_FIELDS = [
+  "spend",
+  "prompt_tokens",
+  "completion_tokens",
+  "cache_read_input_tokens",
+  "cache_creation_input_tokens",
+  "total_tokens",
+  "api_requests",
+  "successful_requests",
+  "failed_requests",
+] as const;
 
-export type SpendMetrics = z.infer<typeof Metrics>;
-export type DailySpend = z.infer<typeof DailySpend>;
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function parseMetrics(value: unknown): SpendMetrics {
+  const source = asObject(value);
+  const metrics = {} as SpendMetrics;
+  for (const field of METRIC_FIELDS) metrics[field] = typeof source[field] === "number" ? source[field] : 0;
+  return metrics;
+}
+
+function parseBreakdown(value: unknown): Record<string, { metrics: SpendMetrics }> {
+  return Object.fromEntries(Object.entries(asObject(value)).map(([name, entry]) => [name, { metrics: parseMetrics(asObject(entry).metrics) }]));
+}
+
+/** Reads a /tag/daily/activity page, keeping only the fields this repo uses. */
+export function parseActivityPage(body: unknown): ActivityPage {
+  const page = asObject(body);
+  if (!Array.isArray(page.results)) throw new LiteLLMError("LiteLLM returned an unexpected /tag/daily/activity response (no results list).");
+  const results = page.results.map((entry): DailySpend => {
+    const day = asObject(entry);
+    if (typeof day.date !== "string") throw new LiteLLMError("LiteLLM returned a day without a date.");
+    const breakdown = asObject(day.breakdown);
+    return {
+      date: day.date,
+      metrics: parseMetrics(day.metrics),
+      breakdown: { model_groups: parseBreakdown(breakdown.model_groups), entities: parseBreakdown(breakdown.entities) },
+    };
+  });
+  const metadata = asObject(page.metadata);
+  return { results, metadata: { page: typeof metadata.page === "number" ? metadata.page : 1, has_more: metadata.has_more === true } };
+}
 
 export type TagActivityQuery = {
   /** Exact tags, e.g. ["ticket:ENG-123"]. Omit for every tag. */
@@ -168,7 +196,7 @@ async function fetchPage(date: string, page: number, tags: string[] | undefined,
         : "";
     throw new LiteLLMError(`LiteLLM returned ${response.status} for /tag/daily/activity.${hint}`, response.status);
   }
-  return ActivityPage.parse(await response.json());
+  return parseActivityPage(await response.json());
 }
 
 /** Every date from start to end, inclusive, newest first. */

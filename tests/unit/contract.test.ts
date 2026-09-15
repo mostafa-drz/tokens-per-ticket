@@ -112,6 +112,11 @@ branch: { template: "{user}/{key}-{slug}" }
     assert.equal(parseContract(`${base}\nautomation: { ledger_url: "https://tokens.acme.dev" }`).automation.ledger_url, "https://tokens.acme.dev");
   });
 
+  it("names the field when the file is wrong", () => {
+    assert.throws(() => parseContract(`${base}\nautomation: { registry_url: "not a url" }`), /automation.registry_url must be a URL/);
+    assert.throws(() => parseContract(`branch: { template: "{key}" }`), /key must be a section/);
+  });
+
   it("rejects a trailer name git would not accept", () => {
     assert.throws(() => parseContract(`${base}\nautomation: { commit_trailer: "Ticket id" }`));
     assert.equal(parseContract(`${base}\nautomation: { commit_trailer: false }`).automation.commit_trailer, false);

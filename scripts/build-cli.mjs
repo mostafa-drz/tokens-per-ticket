@@ -11,7 +11,7 @@ await build({
   outfile: ".tokens-per-ticket/tpt.mjs",
   bundle: true,
   platform: "node",
-  target: "node22",
+  target: "node18",
   format: "esm",
   legalComments: "none",
   minify: true,
