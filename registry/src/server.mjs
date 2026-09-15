@@ -90,8 +90,6 @@ export function parseReport(body) {
     session_id: data.session_id,
     // Tags are case-sensitive; keep one spelling per ticket.
     ticket: data.ticket === null ? null : data.ticket.toUpperCase(),
-    branch: text(data.branch, 256),
-    repo: text(data.repo, 256),
     event: text(data.event, 40) ?? "unknown",
   };
 }

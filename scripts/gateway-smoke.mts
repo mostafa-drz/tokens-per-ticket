@@ -72,7 +72,7 @@ try {
   for (const [ticket, count] of Object.entries(calls)) {
     const sessionId = randomUUID();
     const reported = await reportSession(
-      { session_id: sessionId, ticket, branch: `smoke/${ticket.toLowerCase()}`, repo: "smoke", event: "SessionStart" },
+      { session_id: sessionId, ticket, event: "SessionStart" },
       { registryUrl, gatewayKey: temporaryKey, timeoutMs: 5_000 },
     );
     if (!reported.ok) fail(`The registry refused the session: ${reported.reason}. Is it running (pnpm gateway:up)?`);

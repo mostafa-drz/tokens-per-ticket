@@ -11,8 +11,6 @@
 export type SessionReport = {
   session_id: string;
   ticket: string | null;
-  branch: string | null;
-  repo: string | null;
   event: string;
 };
 

@@ -47,8 +47,8 @@ describe("session hook", () => {
     const output = await handleHook({ hook_event_name: "SessionStart", source: "startup", session_id: "s1", cwd: root }, connected, deps);
 
     assert.deepEqual(
-      reports.map((r) => [r.session_id, r.ticket, r.branch, r.event]),
-      [["s1", "ENG-123", "jane/eng-123-retry", "SessionStart"]],
+      reports.map((r) => [r.session_id, r.ticket, r.event]),
+      [["s1", "ENG-123", "SessionStart"]],
     );
     // The key authenticates the report; it isn't part of the stored payload.
     assert.equal(reports[0].gatewayKey, "sk-jane");

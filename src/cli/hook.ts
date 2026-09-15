@@ -126,14 +126,9 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
       // After a failure, retry at most once a minute: a registry that drops
       // packets would otherwise add its timeout to every prompt.
       const due = !state || now() - state.at > (state.failed ? RETRY_FAILED_MS : REPORT_EVERY_MS);
-      if (event !== "UserPromptSubmit" || changed || due) {
-        const payload: SessionReport = {
-          session_id: input.session_id,
-          ticket,
-          branch,
-          repo: repoName(root),
-          event,
-        };
+      // SessionStart and a moved HEAD always report; a prompt or a cd only when something changed.
+      if (event === "SessionStart" || event === "FileChanged" || changed || due) {
+        const payload: SessionReport = { session_id: input.session_id, ticket, event };
         const result = await report(payload, { registryUrl, gatewayKey });
         reported = result.ok ? "sent" : "failed";
         if (!result.ok) failure = result.reason;
@@ -232,13 +227,6 @@ function git(args: string[], cwd: string): string {
   }
 }
 
-/** A stable, non-sensitive repo name: the origin remote without credentials, or the folder name. */
-function repoName(root: string): string {
-  const remote = git(["config", "--get", "remote.origin.url"], root);
-  if (!remote) return path.basename(root);
-  return remote.replace(/^[a-z+]+:\/\/[^@/]*@/i, "").replace(/\.git$/, "");
-}
-
 type State = { ticket: string | null; branch: string | null; root: string; registryUrl?: string; at: number; failed: boolean; reason: string };
 
 /** Reports "no ticket" for a session last reported on one. Returns that ticket, if it did. */
@@ -247,7 +235,7 @@ async function leaveTicket(sessionId: string, env: Env, { report, stateDir, now 
   const gatewayKey = gatewayKeyFrom(env);
   if (!state?.ticket || !state.registryUrl || !gatewayKey) return null;
   const result = await report(
-    { session_id: sessionId, ticket: null, branch: null, repo: null, event: "CwdChanged" },
+    { session_id: sessionId, ticket: null, event: "left" },
     { registryUrl: state.registryUrl, gatewayKey },
   );
   writeState(stateDir, sessionId, { ...state, ticket: null, branch: null, at: now(), failed: !result.ok, reason: result.ok ? "" : result.reason });
