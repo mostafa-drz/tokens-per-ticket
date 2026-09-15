@@ -104,6 +104,7 @@ export async function postgresStore(pool, { schema = "tpt", retentionDays = 90, 
       await query(`DELETE FROM ${TABLE} WHERE updated_at < now() - make_interval(days => $1)`, [retentionDays]);
     },
   };
-  await store.prune();
+  // Cleanup is housekeeping: a role without DELETE shouldn't stop the registry.
+  await store.prune().catch((error) => console.error(`registry: prune failed: ${error.message}`));
   return store;
 }
