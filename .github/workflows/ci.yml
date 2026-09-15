@@ -19,7 +19,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:unit
-      - run: npm ci --prefix registry
+      - name: The CLI entry points start
+        run: pnpm -s tpt help && pnpm -s ticket:report --help && pnpm -s ticket:start --help
       - run: pnpm test:registry
       - run: pnpm test:gateway
       - name: The committed CLI bundle matches the source

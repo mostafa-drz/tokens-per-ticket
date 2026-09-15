@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { build } from "esbuild";
 
 await build({
-  entryPoints: ["src/cli/tpt.ts"],
+  entryPoints: ["src/cli/tpt.mts"],
   outfile: ".tokens-per-ticket/tpt.mjs",
   bundle: true,
   platform: "node",
