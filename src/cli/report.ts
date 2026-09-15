@@ -89,7 +89,7 @@ export async function runReport(argv: string[]): Promise<void> {
     if (!detail) {
       console.log(
         `\nNo spend recorded for ${key} (tag ${tag}) between ${range.startDate} and ${range.endDate}.\n` +
-          "If you worked on it, check that Claude Code points at the gateway and the repo has the tokens-per-ticket hooks (or the session was started with ticket:start).\n" +
+          "If you worked on it, check the tokens-per-ticket warnings at the start of that Claude Code session: gateway, key, and registry.\n" +
           "LiteLLM also writes spend in batches, so calls from the last minute may not show yet.\n",
       );
       process.exit(0);

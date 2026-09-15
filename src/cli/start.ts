@@ -18,12 +18,10 @@ import {
   findTicketKey,
   loadContract,
   normalizeTicketKey,
-  ticketTag,
   worktreePath,
 } from "../lib/contract.ts";
 import { branchExists, git, listWorktrees, localBranches, mainCheckoutRoot, tryGit } from "../lib/git.ts";
-import { claudeArgs, shellCommand, ticketBranches, userSettingsEnv, withTicketTag } from "../lib/launch.ts";
-import { trustedRegistryUrl } from "../lib/registry-client.ts";
+import { claudeArgs, shellCommand, ticketBranches, userSettingsEnv } from "../lib/launch.ts";
 import { detectPackageManager, flagsTakenByNpm, installCommand } from "../lib/package-manager.ts";
 import { command } from "./hint.ts";
 
@@ -74,7 +72,6 @@ export async function runStart(argv: string[]): Promise<void> {
     normalizeTicketKey(positionals[0], contract) ??
     fail(`"${positionals[0]}" is not a ticket key. tokens-per-ticket.yaml expects /${contract.key.pattern}/.`);
   const title = positionals.slice(1).join(" ");
-  const tag = ticketTag(key, contract);
 
   // 1 + 2. Find or create the worktree for this ticket.
   const existing = listWorktrees(mainRoot).find((wt) => wt.branch && findTicketKey(wt.branch, contract) === key);
@@ -120,22 +117,12 @@ export async function runStart(argv: string[]): Promise<void> {
     console.log(`  Run \`${installCommand(manager)}\` there before running the app or its tests.`);
   }
 
-  // 3. Launch Claude Code. A settings file's env wins over the shell in Claude
-  // Code, so read it first. https://code.claude.com/docs/en/env-vars
+  // 3. Launch Claude Code in the worktree. The hooks report its branch, and the
+  // gateway tags the session's calls; nothing ticket-specific to pass.
+  // A settings file's env wins over the shell in Claude Code, so read it first.
   const userEnv = userSettingsEnv();
   const env = (name: string) => userEnv[name] ?? process.env[name];
-  const automatic =
-    contract.automation.sessions &&
-    trustedRegistryUrl({
-      envUrl: env("TPT_REGISTRY_URL"),
-      repoUrl: contract.automation.registry_url,
-      gatewayUrl: env("ANTHROPIC_BASE_URL"),
-    }).url;
-  // With the registry, the worktree's branch attributes the session and the
-  // gateway refuses client ticket tags; without it, pass the tag explicitly.
-  const args = automatic
-    ? claudeArgs({ key })
-    : claudeArgs({ key, headers: withTicketTag(env("ANTHROPIC_CUSTOM_HEADERS"), tag, contract.tag.prefix) });
+  const args = claudeArgs({ key });
 
   if (!env("ANTHROPIC_BASE_URL")) {
     console.warn(
@@ -145,11 +132,7 @@ export async function runStart(argv: string[]): Promise<void> {
     );
   }
 
-  console.log(
-    automatic
-      ? `\n→ This worktree's branch attributes the session to ${key} automatically`
-      : `\n→ Every model call in this session is tagged ${tag}`,
-  );
+  console.log(`\n→ The session is named ${key}; its branch attributes it automatically`);
 
   if (values.print || !process.stdout.isTTY) {
     console.log(`\ncd ${shellCommand(worktree, []).trim()} && ${shellCommand("claude", args)}\n`);

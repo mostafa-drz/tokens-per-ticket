@@ -3,65 +3,19 @@ import os from "node:os";
 import path from "node:path";
 import { findTicketKey, type TicketContract } from "./contract.ts";
 
-/**
- * How `pnpm ticket:start` hands the ticket to Claude Code.
- *
- * Claude Code sends ANTHROPIC_CUSTOM_HEADERS on every request, and LiteLLM
- * turns an `x-litellm-tags` header into spend tags. The value is fixed for the
- * session, which is why the repo pairs it with one worktree per ticket.
- *
- * It is passed with `claude --settings` rather than a shell export: a settings
- * file `env` block overrides a shell variable of the same name, so an export
- * could be silently ignored. Command-line settings sit above user and project
- * settings. https://code.claude.com/docs/en/settings
- */
-
-const TAGS_HEADER = "x-litellm-tags";
+/** Helpers for `tpt start`, which opens a worktree and a Claude Code session per ticket. */
 
 /**
- * Adds the ticket tag to a newline-separated header list, keeping any other
- * headers and non-ticket tags the developer already sends.
+ * Names the session after the ticket. Attribution needs nothing else: the
+ * worktree's branch is reported by the hooks, and the gateway tags the calls.
  */
-export function withTicketTag(existingHeaders: string | undefined, tag: string, ticketPrefix: string): string {
-  const lines = (existingHeaders ?? "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const others: string[] = [];
-  const tags: string[] = [];
-  for (const line of lines) {
-    const separator = line.indexOf(":");
-    const name = separator === -1 ? line : line.slice(0, separator).trim();
-    if (name.toLowerCase() !== TAGS_HEADER) {
-      others.push(line);
-      continue;
-    }
-    for (const existing of line.slice(separator + 1).split(",")) {
-      const value = existing.trim();
-      if (value && !value.startsWith(ticketPrefix)) tags.push(value);
-    }
-  }
-
-  return [...others, `${TAGS_HEADER}: ${[...tags, tag].join(",")}`].join("\n");
+export function claudeArgs(input: { key: string }): string[] {
+  return ["--name", input.key];
 }
 
-/**
- * The local branches that already name this ticket under the contract, e.g.
- * one a teammate created by hand or one from an earlier worktree that was
- * removed. Starting the ticket should continue that branch, not open a second.
- */
+/** Local branches that belong to the ticket, whatever their title. */
 export function ticketBranches(branches: string[], key: string, contract: TicketContract): string[] {
   return branches.filter((branch) => findTicketKey(branch, contract) === key);
-}
-
-/**
- * Without `headers` (automatic mode), only names the session: the hooks and
- * the gateway plugin attribute it, and the gateway refuses client ticket tags.
- */
-export function claudeArgs(input: { key: string; headers?: string }): string[] {
-  const settings = input.headers === undefined ? [] : ["--settings", JSON.stringify({ env: { ANTHROPIC_CUSTOM_HEADERS: input.headers } })];
-  return [...settings, "--name", input.key];
 }
 
 /** Quotes arguments so the printed command can be pasted into a POSIX shell. */

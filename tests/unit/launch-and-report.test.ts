@@ -1,26 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseContract } from "../../src/lib/contract.ts";
-import { claudeArgs, shellCommand, ticketBranches, withTicketTag } from "../../src/lib/launch.ts";
+import { claudeArgs, shellCommand, ticketBranches } from "../../src/lib/launch.ts";
 import type { TicketDetail } from "../../src/lib/ledger.ts";
 import { upsertJiraReport } from "../../src/lib/jira.ts";
 import { upsertLinearReport } from "../../src/lib/linear.ts";
 import { reportPoster } from "../../src/lib/post.ts";
 import { REPORT_SIGNATURE, renderReport } from "../../src/lib/report.ts";
-
-describe("withTicketTag", () => {
-  it("creates the tags header when there are no custom headers", () => {
-    assert.equal(withTicketTag(undefined, "ticket:ENG-1", "ticket:"), "x-litellm-tags: ticket:ENG-1");
-  });
-
-  it("keeps other headers and other tags, and replaces an older ticket tag", () => {
-    const existing = "x-team: platform\nX-LiteLLM-Tags: team:platform, ticket:ENG-0";
-    assert.equal(
-      withTicketTag(existing, "ticket:ENG-1", "ticket:"),
-      "x-team: platform\nx-litellm-tags: team:platform,ticket:ENG-1",
-    );
-  });
-});
 
 describe("ticketBranches", () => {
   const jira = parseContract(`
@@ -38,14 +24,7 @@ worktree: { path: "../{repo}.worktrees/{branch}" }
 });
 
 describe("claudeArgs", () => {
-  it("passes the header through --settings and names the session after the ticket", () => {
-    const args = claudeArgs({ key: "ENG-1", headers: "x-litellm-tags: ticket:ENG-1" });
-    assert.equal(args[0], "--settings");
-    assert.deepEqual(JSON.parse(args[1]), { env: { ANTHROPIC_CUSTOM_HEADERS: "x-litellm-tags: ticket:ENG-1" } });
-    assert.deepEqual(args.slice(2), ["--name", "ENG-1"]);
-  });
-
-  it("only names the session in automatic mode", () => {
+  it("only names the session: the branch and the gateway do the attribution", () => {
     assert.deepEqual(claudeArgs({ key: "ENG-1" }), ["--name", "ENG-1"]);
   });
 

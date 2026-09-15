@@ -107,44 +107,26 @@ describe("session hook", () => {
     assert.equal(reports.length, 0);
   });
 
-  it("warns that a leftover ticket header will be refused when the registry is on", async () => {
+  it("warns that a leftover ticket header will be refused", async () => {
     const root = productRepo("jane/eng-11-x");
     const output = await handleHook(
       { hook_event_name: "SessionStart", session_id: "s8", cwd: root },
       { ...connected, ANTHROPIC_CUSTOM_HEADERS: "x-litellm-tags: ticket:ENG-7" },
       recorder().deps,
     );
-    assert.match(output.systemMessage ?? "", /will refuse these calls/);
+    assert.match(output.systemMessage ?? "", /refuses those calls/);
     assert.match(output.hookSpecificOutput?.additionalContext ?? "", /count toward ticket ENG-11, following the current branch/);
   });
 
-  it("without a registry, points out a session started for a different ticket than the branch", async () => {
-    const root = productRepo("jane/eng-12-x");
-    writeFileSync(path.join(root, "tokens-per-ticket.yaml"), readFileSync(path.join(root, "tokens-per-ticket.yaml"), "utf8").replace("sessions: true", "sessions: false"));
-    const output = await handleHook(
-      { hook_event_name: "SessionStart", session_id: "s8b", cwd: root },
-      { ...connected, ANTHROPIC_CUSTOM_HEADERS: "x-litellm-tags: ticket:ENG-7" },
-      recorder().deps,
-    );
-    assert.match(output.systemMessage ?? "", /started with ticket ENG-7/);
-    assert.match(output.hookSpecificOutput?.additionalContext ?? "", /ticket ENG-7\./);
-  });
-
-  it("reports a subagent's worktree for that subagent only, without renaming the session", async () => {
-    const root = productRepo("jane/eng-13-main");
-    const worktree = path.join(dir, `wt-${n++}`);
-    execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", "jane/eng-14-side", worktree]);
-    copyFileSync(path.join(root, "tokens-per-ticket.yaml"), path.join(worktree, "tokens-per-ticket.yaml"));
+  it("finds the gateway key a Claude subscription passes in x-litellm-api-key", async () => {
+    const root = productRepo("jane/eng-15-max");
     const { reports, deps } = recorder();
-
-    await handleHook({ hook_event_name: "SessionStart", session_id: "s-sub", cwd: root }, connected, deps);
-    const output = await handleHook({ hook_event_name: "CwdChanged", session_id: "s-sub", agent_id: "agent-1", cwd: root, new_cwd: worktree }, connected, deps);
-
-    assert.deepEqual(
-      reports.map((r) => [r.agent_id ?? "(main)", r.ticket]),
-      [["(main)", "ENG-13"], ["agent-1", "ENG-14"]],
+    await handleHook(
+      { hook_event_name: "SessionStart", session_id: "s-max", cwd: root },
+      { ANTHROPIC_BASE_URL: "http://localhost:4000", TPT_REGISTRY_URL: "http://registry.test", ANTHROPIC_CUSTOM_HEADERS: "x-litellm-api-key: Bearer sk-jane" },
+      deps,
     );
-    assert.equal(output.hookSpecificOutput?.sessionTitle, undefined);
+    assert.equal(reports[0]?.key_fingerprint, keyFingerprint("sk-jane"));
   });
 
   it("stays silent in a repo that hasn't adopted tokens-per-ticket", async () => {

@@ -25,8 +25,6 @@ import { BUNDLE_PATH } from "./hint.ts";
 export type HookInput = {
   hook_event_name?: string;
   session_id?: string;
-  /** Set when the hook fires inside a subagent. */
-  agent_id?: string;
   cwd?: string;
   source?: string;
   session_title?: string;
@@ -83,11 +81,8 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const ticket = branch ? findTicketKey(branch, contract) : null;
   const headPath = git(["rev-parse", "--path-format=absolute", "--git-path", "HEAD"], cwd);
   const watchPaths = headPath ? [headPath] : [];
-  const explicit = explicitTicket(env.ANTHROPIC_CUSTOM_HEADERS, contract);
+  const headerTicket = headerTicketTag(env.ANTHROPIC_CUSTOM_HEADERS, contract);
 
-  // Inside a subagent, report for that subagent only: its worktree or `cd`
-  // must not move the main conversation's ticket or rename the session.
-  const agentId = input.agent_id || undefined;
   const startEvent = event === "SessionStart" || event === "CwdChanged";
   let cliNotice: string | undefined;
   if (startEvent) {
@@ -99,7 +94,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     ensureCommitTrailerHook(root, contract);
   }
 
-  const title = !agentId && event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
+  const title = event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
 
   // Where calls go and who makes them. Without both, the registry can't help.
   const problems: string[] = cliNotice ? [cliNotice] : [];
@@ -111,7 +106,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     gatewayUrl: env.ANTHROPIC_BASE_URL,
   });
   const registryUrl = registry.url;
-  const gatewayKey = env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY;
+  const gatewayKey = gatewayKeyFrom(env);
   const automatic = contract.automation.sessions && registryUrl;
   if (contract.automation.sessions && registry.ignored && env.ANTHROPIC_BASE_URL) {
     problems.push(
@@ -125,14 +120,13 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     if (!gatewayKey) {
       problems.push("No gateway key in ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY, so this session can't be reported to the registry.");
     } else {
-      const stateId = agentId ? `${input.session_id}.${agentId}` : input.session_id;
+      const stateId = input.session_id;
       const state = readState(stateDir, stateId);
       const changed = !state || state.ticket !== ticket || state.branch !== branch || state.root !== root;
       const due = !state || now() - state.at > REPORT_EVERY_MS || state.failed;
       if (event !== "UserPromptSubmit" || changed || due) {
         const payload: SessionReport = {
           session_id: input.session_id,
-          ...(agentId ? { agent_id: agentId } : {}),
           key_fingerprint: keyFingerprint(gatewayKey),
           ticket,
           branch,
@@ -147,23 +141,19 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
         writeState(stateDir, stateId, { ticket, branch, root, at: now(), failed: !result.ok, reason: failure });
         if (!result.ok && alreadyWarned && event === "UserPromptSubmit") return {};
       }
-      if (reported === "failed") problems.push(`Couldn't report this session to the registry: ${failure}. Its spend isn't attributed until that works.`);
+      if (reported === "failed") problems.push(`Couldn't report this session to the registry: ${failure.replace(/\.$/, "")}. Its spend isn't attributed until that works.`);
     }
   }
 
-  // With the registry on, the gateway refuses requests that carry their own
-  // ticket tag, so a leftover header would break every call in the session.
-  if (automatic && explicit) {
-    problems.push(`ANTHROPIC_CUSTOM_HEADERS sets ticket ${explicit}, but the gateway sets tickets itself and will refuse these calls. Remove the ticket entry from x-litellm-tags.`);
-  }
-  // Without it, an explicit tag from `tpt start` counts.
-  if (!automatic && explicit && ticket && explicit !== ticket) {
-    problems.push(`This session was started with ticket ${explicit}, which the gateway keeps even though the branch is ${ticket}. Start a new session to follow the branch.`);
+  // The gateway refuses requests that carry their own ticket tag, so a leftover
+  // header would break every call in the session.
+  if (headerTicket) {
+    problems.push(`ANTHROPIC_CUSTOM_HEADERS sets ticket ${headerTicket} in x-litellm-tags, but the gateway sets tickets itself and refuses those calls. Remove that entry.`);
   }
 
-  const billedTo = automatic ? ticket : explicit;
+  const billedTo = automatic ? ticket : null;
   const context = billedTo
-    ? `tokens-per-ticket: model calls in this session count toward ticket ${billedTo}${automatic ? ", following the current branch automatically" : ""}.`
+    ? `tokens-per-ticket: model calls in this session count toward ticket ${billedTo}, following the current branch automatically.`
     : `tokens-per-ticket: branch "${branch ?? "(detached)"}" doesn't name a ticket, so this session's spend isn't attributed to one.`;
 
   if (event === "UserPromptSubmit") {
@@ -200,7 +190,24 @@ function withEvent(event: string, fields: { additionalContext?: string; sessionT
   return output;
 }
 
-function explicitTicket(headers: string | undefined, contract: TicketContract): string | null {
+/**
+ * The gateway key Claude Code sends: ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY,
+ * or, for teams on Claude subscriptions, the LiteLLM virtual key passed as
+ * `x-litellm-api-key` in ANTHROPIC_CUSTOM_HEADERS
+ * (https://docs.litellm.ai/docs/tutorials/claude_code_max_subscription).
+ */
+export function gatewayKeyFrom(env: Env): string | undefined {
+  for (const line of (env.ANTHROPIC_CUSTOM_HEADERS ?? "").split("\n")) {
+    const separator = line.indexOf(":");
+    if (separator !== -1 && line.slice(0, separator).trim().toLowerCase() === "x-litellm-api-key") {
+      const value = line.slice(separator + 1).trim().replace(/^Bearer\s+/i, "");
+      if (value) return value;
+    }
+  }
+  return env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY || undefined;
+}
+
+function headerTicketTag(headers: string | undefined, contract: TicketContract): string | null {
   for (const line of (headers ?? "").split("\n")) {
     const separator = line.indexOf(":");
     if (separator === -1 || line.slice(0, separator).trim().toLowerCase() !== "x-litellm-tags") continue;
