@@ -248,15 +248,10 @@ describe("commit trailer", () => {
     assert.equal(run(HOOK_SCRIPT, ["MSG"]), "ran git-trailer");
   });
 
-  it("falls back to the copy next to the session state on a branch without the CLI", () => {
+  it("does nothing on a branch without the CLI", () => {
     const root = productRepo("jane/eng-47-x");
-    const state = mkdtempSync(path.join(dir, "xdg-"));
-    mkdirSync(path.join(state, "tokens-per-ticket"));
-    writeFileSync(path.join(state, "tokens-per-ticket/tpt.mjs"), 'console.log("ran fallback")\n');
-    const run = (env: Record<string, string>) =>
-      execFileSync("sh", ["-c", HOOK_COMMAND], { cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...env }, encoding: "utf8" }).trim();
-    assert.equal(run({ XDG_STATE_HOME: state }), "ran fallback");
-    assert.equal(run({ XDG_STATE_HOME: path.join(dir, "empty-xdg") }), "");
+    const out = execFileSync("sh", ["-c", HOOK_COMMAND], { cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8" });
+    assert.equal(out, "");
   });
 
   it("doesn't tell Claude the session counts toward a ticket when the report failed", async () => {
