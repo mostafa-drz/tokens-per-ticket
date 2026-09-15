@@ -155,6 +155,13 @@ class SessionTicketTaggerTest(unittest.TestCase):
         tags, client = self.run_hook(self.jane_token, request(), {}, fail=True)
         self.assertEqual((tags, client.calls), (["ticket:ENG-1"], 0))
 
+    def test_junk_session_ids_are_never_looked_up_and_cant_trigger_backoff(self):
+        for _ in range(5):
+            tags, client = self.run_hook(self.jane_token, request(session_id="x" * 16_000), {})
+            self.assertEqual((tags, client.calls), ([], 0))
+        tags, _ = self.run_hook(self.jane_token, request(), {"s1": {"ticket": "ENG-1", "key_token": self.jane_token}})
+        self.assertEqual(tags, ["ticket:ENG-1"])
+
     def test_a_padded_or_capitalized_ticket_tag_is_still_refused(self):
         for tag in (" ticket:ENG-999", "Ticket:ENG-999"):
             data = {**request(), "tags": [tag]}

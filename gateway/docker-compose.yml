@@ -42,9 +42,12 @@ services:
 
   # Which ticket each Claude Code session is on. Hooks in your repos report to
   # it with the developer's virtual key (serve it over HTTPS in production); the
-  # gateway plugin reads it. It gets only its own secret, not LiteLLM's keys.
+  # gateway plugin reads it. It gets its own secret, not LiteLLM's keys. Locally it
+  # shares LiteLLM's database login; in production give it the narrow role the
+  # README describes.
   registry:
     build: ../registry
+    restart: unless-stopped
     ports:
       - "127.0.0.1:4100:4100"
     environment:

@@ -37,6 +37,7 @@ during auth, before this hook, so they don't see these tags.
 """
 
 import os
+import re
 import time
 from urllib.parse import quote
 
@@ -45,6 +46,9 @@ from litellm._logging import verbose_proxy_logger
 from litellm.integrations.custom_logger import CustomLogger
 
 SESSION_HEADER = "x-claude-code-session-id"
+# The registry accepts the same shape (registry/src/server.mjs). Anything else
+# is never looked up, so a junk header can't make the registry look unhealthy.
+SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 TAGS_HEADER = "x-litellm-tags"
 
 
@@ -96,7 +100,7 @@ class SessionTicketTagger(CustomLogger):
     async def _tag(self, user_api_key_dict, data: dict) -> None:
         headers = {str(k).lower(): v for k, v in ((data.get("proxy_server_request") or {}).get("headers") or {}).items()}
         session_id = headers.get(SESSION_HEADER)
-        if not session_id:
+        if not isinstance(session_id, str) or not SESSION_ID.match(session_id):
             return
         session = await self._lookup(session_id)
         if not session or not session.get("ticket"):
@@ -159,14 +163,18 @@ class SessionTicketTagger(CustomLogger):
                 f"{self.registry_url}/v1/sessions/{quote(session_id, safe='')}",
                 headers={"Authorization": f"Bearer {self.registry_token}"},
             )
-            if response.status_code not in (200, 404):
-                raise RuntimeError(f"registry returned {response.status_code}")
         except Exception:
             self._failures += 1
             if self._failures >= self.failures_before_backoff:
                 self._skip_until = now + self.backoff_seconds
                 self._failures = 0
             raise
+        if response.status_code >= 500:
+            self._failures += 1
+            if self._failures >= self.failures_before_backoff:
+                self._skip_until = now + self.backoff_seconds
+                self._failures = 0
+            raise RuntimeError(f"registry returned {response.status_code}")
         self._failures = 0
         session = response.json() if response.status_code == 200 else None
 

@@ -11,7 +11,16 @@ const required = (name) => {
   return value;
 };
 
-const pool = new pg.Pool({ connectionString: required("DATABASE_URL"), max: 5 });
+const pool = new pg.Pool({
+  connectionString: required("DATABASE_URL"),
+  max: 5,
+  connectionTimeoutMillis: 2_000,
+  statement_timeout: 2_000,
+});
+// An idle client that loses its connection (Postgres restart, failover, idle
+// timeout) emits 'error' on the pool; unhandled, that exits the process.
+// https://node-postgres.com/apis/pool#error
+pool.on("error", (error) => console.error(`registry: database connection lost: ${error.message}`));
 const store = await postgresStore(pool, { retentionDays: Number(process.env.TPT_RETENTION_DAYS ?? 90) });
 const server = createServer({
   store,
