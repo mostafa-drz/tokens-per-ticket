@@ -71,6 +71,26 @@ export function cacheReadShare(usage: Usage): number {
   return usage.promptTokens === 0 ? 0 : usage.cacheReadTokens / usage.promptTokens;
 }
 
+/**
+ * The tag LiteLLM adds to every Claude Code request from its User-Agent
+ * ("claude-cli/2.1.x ..." → "User-Agent: claude-cli"), unless
+ * disable_add_user_agent_to_request_tags is set.
+ */
+export const CLAUDE_CODE_TAG = "User-Agent: claude-cli";
+
+/**
+ * All Claude Code spend in the range, attributed to a ticket or not. Compared
+ * with the ticket rows, it shows what share of spend the tickets explain, so
+ * missing attribution (branches outside the contract, sessions not connected
+ * to the registry) is visible instead of silently absent.
+ */
+export function claudeCodeUsage(days: DailySpend[]): Usage {
+  return days.reduce((usage, day) => {
+    const entity = day.breakdown.entities[CLAUDE_CODE_TAG];
+    return entity ? addMetrics(usage, entity.metrics) : usage;
+  }, emptyUsage());
+}
+
 /** Every ticket that spent anything in the range, most expensive first. */
 export function summarizeTickets(days: DailySpend[], contract: TicketContract): TicketRow[] {
   const rows = new Map<string, TicketRow>();

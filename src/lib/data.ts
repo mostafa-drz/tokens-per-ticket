@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { connection } from "next/server";
 import { basicAuthOk } from "./basic-auth";
 import { loadContract, ticketTag, type TicketContract } from "./contract";
-import { summarizeTicket, summarizeTickets, type TicketDetail, type TicketRow } from "./ledger";
+import { claudeCodeUsage, summarizeTicket, summarizeTickets, type TicketDetail, type TicketRow, type Usage } from "./ledger";
 import { fetchTagActivity, lastDays, type TagActivityQuery } from "./litellm";
 import { sampleTagActivity, sampleTitle } from "./sample";
 
@@ -67,10 +67,13 @@ async function activity(query: TagActivityQuery) {
 
 export type LedgerRow = TicketRow & { title?: string };
 
-export async function getTickets(days: RangeDays): Promise<{ rows: LedgerRow[]; range: ReturnType<typeof lastDays> }> {
+export async function getTickets(
+  days: RangeDays,
+): Promise<{ rows: LedgerRow[]; claudeCode: Usage; range: ReturnType<typeof lastDays> }> {
   const range = lastDays(days);
-  const rows = summarizeTickets(await activity(range), contract());
-  return { rows: rows.map((row) => ({ ...row, title: titleFor(row.key) })), range };
+  const activityDays = await activity(range);
+  const rows = summarizeTickets(activityDays, contract());
+  return { rows: rows.map((row) => ({ ...row, title: titleFor(row.key) })), claudeCode: claudeCodeUsage(activityDays), range };
 }
 
 export async function getTicket(

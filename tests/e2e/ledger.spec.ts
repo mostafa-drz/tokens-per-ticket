@@ -8,6 +8,12 @@ test("the ledger is honest that it shows sample data", async ({ page }) => {
   await expect(page.getByText("Sample data")).toBeVisible();
 });
 
+test("the ledger shows how much Claude Code spend the tickets explain", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Attributed", { exact: true })).toBeVisible();
+  await expect(page.getByText(/of \$[\d,.]+ Claude Code spend/)).toBeVisible();
+});
+
 test("tickets are listed most expensive first and open their detail", async ({ page }) => {
   await page.goto("/");
   const rows = page.getByRole("row");
@@ -48,7 +54,7 @@ test("AI review explains itself when the deployment has no review model", async 
 test("a ticket with no spend says what to check", async ({ page }) => {
   await page.goto("/tickets/TPT-999");
   await expect(page.getByText("No spend recorded for TPT-999 in this range")).toBeVisible();
-  await expect(page.getByText("pnpm ticket:start TPT-999")).toBeVisible();
+  await expect(page.getByText(/the branch names TPT-999/)).toBeVisible();
 });
 
 test("a path that isn't a ticket key is a 404", async ({ page }) => {

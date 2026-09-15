@@ -6,7 +6,7 @@ import { addMetrics, cacheReadShare, emptyUsage } from "@/lib/ledger";
 
 export default async function LedgerPage({ searchParams }: PageProps<"/">) {
   const days = parseRange((await searchParams).days);
-  const { rows, range } = await getTickets(days);
+  const { rows, claudeCode, range } = await getTickets(days);
 
   const total = rows.reduce(
     (sum, row) =>
@@ -46,8 +46,9 @@ export default async function LedgerPage({ searchParams }: PageProps<"/">) {
 
       {rows.length === 0 ? (
         <Empty title="No ticket spend in this range">
-          Start work with <code className="num">pnpm ticket:start ENG-123</code> so Claude Code tags its calls, or
-          run <code className="num">pnpm gateway:smoke</code> to send a few tagged test calls.
+          Work on a ticket branch in a repo set up with <code className="num">tpt init</code>, with Claude Code
+          pointed at the gateway. Or run <code className="num">pnpm gateway:smoke</code> to send a few tagged test
+          calls.
         </Empty>
       ) : (
         <>
@@ -55,7 +56,11 @@ export default async function LedgerPage({ searchParams }: PageProps<"/">) {
             <Figure label="Spend" value={formatUsd(total.spend)} />
             <Figure label="Tokens" value={formatTokens(total.totalTokens)} />
             <Figure label="Cache reads" value={formatPercent(cacheReadShare(total))} note="of input tokens" />
-            <Figure label="Requests" value={total.requests.toLocaleString("en-US")} />
+            <Figure
+              label="Attributed"
+              value={claudeCode.spend > 0 ? formatPercent(Math.min(1, total.spend / claudeCode.spend)) : "—"}
+              note={claudeCode.spend > 0 ? `of ${formatUsd(claudeCode.spend)} Claude Code spend` : "no Claude Code tag in range"}
+            />
           </Figures>
 
           <div className="overflow-x-auto">

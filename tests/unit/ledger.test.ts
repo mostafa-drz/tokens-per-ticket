@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { loadContract } from "../../src/lib/contract.ts";
-import { cacheReadShare, summarizeTicket, summarizeTickets } from "../../src/lib/ledger.ts";
+import { cacheReadShare, claudeCodeUsage, summarizeTicket, summarizeTickets } from "../../src/lib/ledger.ts";
 import { fetchTagActivity, lastDays, LiteLLMError, mergeDays, PAGE_SIZE, type DailySpend } from "../../src/lib/litellm.ts";
 
 const contract = loadContract();
@@ -123,6 +123,18 @@ describe("fetchTagActivity", () => {
       ),
       /Is the gateway running/,
     );
+  });
+});
+
+describe("claudeCodeUsage", () => {
+  it("sums LiteLLM's Claude Code User-Agent tag, not the versioned variants", () => {
+    const metrics = (spend: number) => ({ metrics: { spend, prompt_tokens: 0, completion_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, total_tokens: 0, api_requests: 1, successful_requests: 1, failed_requests: 0 } });
+    const day = (date: string, spend: number) => ({
+      date,
+      metrics: metrics(spend * 3).metrics,
+      breakdown: { model_groups: {}, entities: { "User-Agent: claude-cli": metrics(spend), "User-Agent: claude-cli/2.1.270 (external, cli)": metrics(spend), "ticket:TPT-1": metrics(spend / 2) } },
+    });
+    assert.equal(claudeCodeUsage([day("2026-09-14", 4), day("2026-09-13", 2)]).spend, 6);
   });
 });
 

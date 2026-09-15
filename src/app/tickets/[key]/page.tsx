@@ -43,9 +43,9 @@ export default async function TicketPage({ params, searchParams }: PageProps<"/t
 
       {!detail ? (
         <Empty title={`No spend recorded for ${key} in this range`}>
-          If someone worked on it, check that their session started with{" "}
-          <code className="num">pnpm ticket:start {key}</code> and points at the gateway. LiteLLM writes spend in
-          batches, so the last minute may not show yet.
+          If someone worked on it, check that the branch names <code className="num">{key}</code>, the repo has the
+          tokens-per-ticket hooks, and Claude Code points at the gateway. LiteLLM writes spend in batches, so the
+          last minute may not show yet.
         </Empty>
       ) : (
         <>

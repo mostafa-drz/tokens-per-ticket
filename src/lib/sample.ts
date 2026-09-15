@@ -1,4 +1,5 @@
 import { ticketTag, type TicketContract } from "./contract.ts";
+import { CLAUDE_CODE_TAG } from "./ledger.ts";
 import { isoDate, type DailySpend, type SpendMetrics, type TagActivityQuery } from "./litellm.ts";
 
 /**
@@ -99,6 +100,33 @@ function sampleRows(contract: TicketContract, now: Date): Row[] {
       }
     }
   });
+  // Every Claude Code call also carries LiteLLM's User-Agent tag, and some
+  // work happened outside ticket branches (main, spikes): about 1 in 8 dollars.
+  for (const row of [...rows]) rows.push({ ...row, tag: CLAUDE_CODE_TAG });
+  const rand = random("unattributed");
+  for (let d = 2; d < 40; d += 3) {
+    const date = new Date(now);
+    date.setUTCDate(date.getUTCDate() - d);
+    const prompt = Math.round(300_000 + rand() * 500_000);
+    const completion = Math.round(prompt * 0.04);
+    const requests = Math.round(prompt / 25_000);
+    rows.push({
+      date: isoDate(date),
+      tag: CLAUDE_CODE_TAG,
+      model: "claude-sonnet-5",
+      metrics: {
+        spend: prompt * 3e-6 + completion * 15e-6,
+        prompt_tokens: prompt,
+        completion_tokens: completion,
+        cache_read_input_tokens: Math.round(prompt * 0.4),
+        cache_creation_input_tokens: 0,
+        total_tokens: prompt + completion,
+        api_requests: requests,
+        successful_requests: requests,
+        failed_requests: 0,
+      },
+    });
+  }
   return rows;
 }
 
