@@ -100,12 +100,39 @@ class SessionTicketTaggerTest(unittest.TestCase):
         tags, _ = self.run_hook(self.jane_token, request(tags=["User-Agent: claude-cli"]), {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
         self.assertEqual(tags, ["User-Agent: claude-cli", "ticket:ENG-1"])
 
-    def test_removes_ticket_tags_the_client_sent(self):
+    def test_refuses_a_request_that_sets_its_own_ticket_tag(self):
         records = {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}}
-        tags, _ = self.run_hook(self.jane_token, request(tags=["ticket:ENG-999", "team:web"]), records)
+        for data in (
+            request(tags=["ticket:ENG-999"]),
+            {**request(), "proxy_server_request": {"headers": {"X-LiteLLM-Tags": "team:web, ticket:ENG-999"}}},
+            {**request(), "tags": ["ticket:ENG-999"]},
+        ):
+            self.plugin._client = _Client(records)
+            result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, data, "anthropic_messages"))
+            self.assertIsInstance(result, str)
+            self.assertIn("set by the gateway", result)
+
+    def test_other_client_tags_are_fine(self):
+        tags, _ = self.run_hook(self.jane_token, request(tags=["team:web"]), {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
         self.assertEqual(tags, ["team:web", "ticket:ENG-1"])
-        tags, _ = self.run_hook(self.jane_token, request(session_id="unknown", tags=["ticket:ENG-999"]), records)
-        self.assertEqual(tags, [])
+
+    def test_tags_the_logging_copy_litellm_records_spend_from(self):
+        data = request(tags=["team:web"])
+        logging_obj = types.SimpleNamespace(model_call_details={"litellm_params": {"metadata": {"tags": ["team:web"]}, "litellm_metadata": {"tags": ["team:web"]}}})
+        data["litellm_logging_obj"] = logging_obj
+        self.run_hook(self.jane_token, data, {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
+        params = logging_obj.model_call_details["litellm_params"]
+        self.assertEqual(params["metadata"]["tags"], ["team:web", "ticket:ENG-1"])
+        self.assertEqual(params["litellm_metadata"]["tags"], ["team:web", "ticket:ENG-1"])
+
+    def test_a_refused_request_is_not_logged_under_the_claimed_ticket(self):
+        data = request(tags=["ticket:ENG-999"])
+        logging_obj = types.SimpleNamespace(model_call_details={"litellm_params": {"metadata": {"tags": ["ticket:ENG-999", "team:web"]}}})
+        data["litellm_logging_obj"] = logging_obj
+        self.plugin._client = _Client({})
+        result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, data, "anthropic_messages"))
+        self.assertIsInstance(result, str)
+        self.assertEqual(logging_obj.model_call_details["litellm_params"]["metadata"]["tags"], ["team:web"])
 
     def test_another_keys_call_is_not_tagged(self):
         tags, _ = self.run_hook(self.omar_token, request(), {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
@@ -122,8 +149,7 @@ class SessionTicketTaggerTest(unittest.TestCase):
         self.assertEqual(tags, ["ticket:ENG-1"])
 
     def test_a_registry_outage_is_skipped_after_the_first_failure(self):
-        data = request(tags=["ticket:ENG-999"])
-        tags, first = self.run_hook(self.jane_token, data, {}, fail=True)
+        tags, first = self.run_hook(self.jane_token, request(), {}, fail=True)
         self.assertEqual((tags, first.calls), ([], 1))
         _, second = self.run_hook(self.jane_token, request(), {}, fail=True)
         self.assertEqual(second.calls, 0)
