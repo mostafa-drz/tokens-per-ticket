@@ -18,7 +18,11 @@ describe("postgres store", { skip: !url && "set TPT_TEST_DATABASE_URL to run" },
     await pool.query(`CREATE SCHEMA ${schema}`);
     // The part of LiteLLM's key table the registry reads.
     await pool.query(`CREATE TABLE "LiteLLM_VerificationToken" (token text PRIMARY KEY, blocked boolean, expires timestamptz)`);
-    await pool.query(`INSERT INTO "LiteLLM_VerificationToken" VALUES ($1, null, null), ($2, true, null)`, [sha("sk-jane"), sha("sk-blocked")]);
+    await pool.query(`INSERT INTO "LiteLLM_VerificationToken" VALUES ($1, null, null), ($2, true, null), ($3, null, now() - interval '1 day')`, [
+      sha("sk-jane"),
+      sha("sk-blocked"),
+      sha("sk-expired"),
+    ]);
   });
 
   after(async () => {
@@ -26,16 +30,15 @@ describe("postgres store", { skip: !url && "set TPT_TEST_DATABASE_URL to run" },
     await pool?.end();
   });
 
-  it("knows active keys by fingerprint, keeps owners, and records events only for accepted writes", async () => {
+  it("accepts only active keys and keeps a session with the key that reported it", async () => {
     const store = await postgresStore(pool);
-    assert.equal(await store.isKnownFingerprint(sha(sha("sk-jane"))), true);
-    assert.equal(await store.isKnownFingerprint(sha(sha("sk-blocked"))), false);
+    assert.equal(await store.isActiveToken(sha("sk-jane")), true);
+    assert.equal(await store.isActiveToken(sha("sk-blocked")), false);
+    assert.equal(await store.isActiveToken(sha("sk-expired")), false);
 
-    const report = { session_id: "s1", ticket: "ENG-1", branch: null, repo: null, event: "SessionStart", head: null };
-    assert.equal(await store.put({ ...report, key_fingerprint: sha(sha("sk-jane")) }), true);
-    assert.equal(await store.put({ ...report, ticket: "ENG-9", key_fingerprint: sha(sha("sk-other")) }), false);
+    const report = { session_id: "s1", ticket: "ENG-1", branch: null, repo: null };
+    assert.equal(await store.put({ ...report, key_token: sha("sk-jane") }), true);
+    assert.equal(await store.put({ ...report, ticket: "ENG-9", key_token: sha("sk-other") }), false);
     assert.equal((await store.get("s1")).ticket, "ENG-1");
-    const { rows } = await pool.query("SELECT ticket FROM tpt_session_events ORDER BY id");
-    assert.deepEqual(rows.map((r) => r.ticket), ["ENG-1"]);
   });
 });

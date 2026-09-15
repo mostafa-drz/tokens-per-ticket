@@ -19,9 +19,9 @@ Rules:
   TPT_ALLOW_PASS_THROUGH=true (for a gateway that also serves product traffic
   that way; then restrict developer keys with allowed_routes). Claude Code
   uses /v1/messages.
-- The session must have been reported by the key making the call. Hooks send
-  sha256(sha256(key)); LiteLLM knows the key as sha256(key)
-  (`user_api_key_dict.token`), so one more round gives the same fingerprint.
+- The session must have been reported by the key making the call: the
+  registry stores sha256(key) of the reporting key, the same form LiteLLM
+  gives this hook as `user_api_key_dict.token`.
 - LiteLLM records spend tags from its logging object's copy of the request
   metadata (`model_call_details.litellm_params`), taken before plugins run and
   preferred over the request's own (v1.100.1, litellm_logging.py
@@ -35,7 +35,6 @@ Loaded with `litellm_settings.callbacks: tokens_per_ticket.proxy_handler_instanc
 during auth, before this hook, so they don't see these tags.
 """
 
-import hashlib
 import os
 import time
 from urllib.parse import quote
@@ -102,7 +101,7 @@ class SessionTicketTagger(CustomLogger):
         if not session or not session.get("ticket"):
             return
         token = getattr(user_api_key_dict, "token", None)
-        if not token or session.get("key_fingerprint") != hashlib.sha256(token.encode()).hexdigest():
+        if not token or session.get("key_token") != token:
             return
 
         ticket_tag = f"{self.tag_prefix}{session['ticket']}"
