@@ -46,8 +46,10 @@ export async function reportSession(
  * settings. The repository's `automation.registry_url` is a default that any
  * branch can change, so it's honored only on the same host as
  * ANTHROPIC_BASE_URL, which the user configured and which already receives
- * the key.
+ * the key, and only over HTTPS (plain HTTP only on this machine).
  */
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
 export function trustedRegistryUrl(input: {
   envUrl?: string;
   repoUrl?: string;
@@ -56,9 +58,10 @@ export function trustedRegistryUrl(input: {
   if (input.envUrl) return { url: input.envUrl };
   if (!input.repoUrl) return { url: null };
   try {
-    const repoHost = new URL(input.repoUrl).hostname;
+    const repo = new URL(input.repoUrl);
     const gatewayHost = input.gatewayUrl ? new URL(input.gatewayUrl).hostname : null;
-    if (gatewayHost && repoHost === gatewayHost) return { url: input.repoUrl };
+    const secure = repo.protocol === "https:" || (repo.protocol === "http:" && LOOPBACK.has(repo.hostname));
+    if (gatewayHost && repo.hostname === gatewayHost && secure) return { url: input.repoUrl };
   } catch {
     // Malformed URL: treat as untrusted.
   }

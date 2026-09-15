@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { CONTRACT_FILE, findTicketKey, keyFromTag, loadContract, type TicketContract } from "../lib/contract.ts";
 import { reportSession, trustedRegistryUrl, type SessionReport } from "../lib/registry-client.ts";
-import { ensureCommitTrailerHook, refreshTrustedCli } from "./git-trailer.ts";
+import { ensureCommitTrailerHook } from "./git-trailer.ts";
 import { BUNDLE_PATH } from "./hint.ts";
 
 /**
@@ -51,6 +51,7 @@ type Deps = {
 };
 
 const REPORT_EVERY_MS = 10 * 60_000;
+const RETRY_FAILED_MS = 60_000;
 
 export async function handleHook(input: HookInput, env: Env = process.env, deps: Partial<Deps> = {}): Promise<HookOutput> {
   const { report, stateDir, now } = {
@@ -84,20 +85,12 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const headerTicket = headerTicketTag(env.ANTHROPIC_CUSTOM_HEADERS, contract);
 
   const startEvent = event === "SessionStart" || event === "CwdChanged";
-  let cliNotice: string | undefined;
-  if (startEvent) {
-    // Create the trusted copy the hooks run, only if this clone has none yet.
-    // A branch with a different CLI is reported, never copied or run.
-    if (refreshTrustedCli(root, { replace: false }) === "differs" && event === "SessionStart") {
-      cliNotice = `This checkout carries a different ${BUNDLE_PATH} than the copy the hooks run (in .git). The hooks keep using that copy. After reviewing the change, run \`node ${BUNDLE_PATH} init\` to switch to it.`;
-    }
-    ensureCommitTrailerHook(root, contract);
-  }
+  if (startEvent) ensureCommitTrailerHook(root, contract);
 
   const title = event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
 
   // Where calls go and who makes them. Without both, the registry can't help.
-  const problems: string[] = cliNotice ? [cliNotice] : [];
+  const problems: string[] = [];
   if (!env.ANTHROPIC_BASE_URL) problems.push("Claude Code isn't pointed at the LiteLLM gateway (ANTHROPIC_BASE_URL is not set), so no spend from this session reaches it.");
 
   const registry = trustedRegistryUrl({
@@ -115,6 +108,8 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   }
 
   let reported: "sent" | "skipped" | "failed" = "skipped";
+  // Whether the registry has this session's current ticket, as far as we know.
+  let registered = false;
   let failure = "";
   if (automatic && env.ANTHROPIC_BASE_URL && input.session_id) {
     if (!gatewayKey) {
@@ -123,7 +118,9 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
       const stateId = input.session_id;
       const state = readState(stateDir, stateId);
       const changed = !state || state.ticket !== ticket || state.branch !== branch || state.root !== root;
-      const due = !state || now() - state.at > REPORT_EVERY_MS || state.failed;
+      // After a failure, retry at most once a minute: a registry that drops
+      // packets would otherwise add its timeout to every prompt.
+      const due = !state || now() - state.at > (state.failed ? RETRY_FAILED_MS : REPORT_EVERY_MS);
       if (event !== "UserPromptSubmit" || changed || due) {
         const payload: SessionReport = {
           session_id: input.session_id,
@@ -138,7 +135,10 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
         const alreadyWarned = state?.failed && state.reason === failure;
         writeState(stateDir, stateId, { ticket, branch, root, at: now(), failed: !result.ok, reason: failure });
         if (!result.ok && alreadyWarned && event === "UserPromptSubmit") return {};
+      } else {
+        registered = state?.failed === false;
       }
+      if (reported === "sent") registered = true;
       if (reported === "failed") problems.push(`Couldn't report this session to the registry: ${failure.replace(/\.$/, "")}. Its spend isn't attributed until that works.`);
     }
   }
@@ -149,7 +149,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
     problems.push(`ANTHROPIC_CUSTOM_HEADERS sets ticket ${headerTicket} in x-litellm-tags, but the gateway sets tickets itself and refuses those calls. Remove that entry.`);
   }
 
-  const billedTo = automatic ? ticket : null;
+  const billedTo = registered ? ticket : null;
   const context = billedTo
     ? `tokens-per-ticket: model calls in this session count toward ticket ${billedTo}, following the current branch automatically.`
     : ticket
@@ -274,16 +274,11 @@ function firstLine(error: unknown): string {
 }
 
 /**
- * Claude Code settings entries for the hook, merged by `init`.
- *
- * The command runs the CLI copy in the git directory, so a branch that swaps
- * .tokens-per-ticket/tpt.mjs doesn't change what runs. It falls back to the
- * checkout's file only in a clone that has no copy yet, and that first run
- * creates the copy. Shell form, because it chooses between two paths; Claude
- * Code exports CLAUDE_PROJECT_DIR to hook processes in both forms.
+ * Claude Code settings entries for the hook, merged by `init`. Claude Code
+ * exports CLAUDE_PROJECT_DIR to hook processes.
  * https://code.claude.com/docs/en/hooks
  */
-export const HOOK_COMMAND = `c="$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/tokens-per-ticket/tpt.mjs"; [ -f "$c" ] || c="$CLAUDE_PROJECT_DIR/${BUNDLE_PATH}"; node "$c" hook`;
+export const HOOK_COMMAND = `node "$CLAUDE_PROJECT_DIR/${BUNDLE_PATH}" hook`;
 
 export function hookSettings(): Record<string, unknown[]> {
   const handler = { type: "command", command: HOOK_COMMAND };

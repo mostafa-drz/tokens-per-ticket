@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, w
 import os from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
-import { HOOK_SCRIPT, ensureCommitTrailerHook, refreshTrustedCli, runGitTrailer, trustedCliPath } from "../../src/cli/git-trailer.ts";
+import { HOOK_SCRIPT, ensureCommitTrailerHook, runGitTrailer } from "../../src/cli/git-trailer.ts";
 import { HOOK_COMMAND, handleHook } from "../../src/cli/hook.ts";
 import { mergeHookSettings } from "../../src/cli/init.ts";
 import { loadContract } from "../../src/lib/contract.ts";
@@ -151,6 +151,9 @@ describe("registry URL trust", () => {
       ignored: "https://evil.example/collect",
     });
     assert.equal(trustedRegistryUrl({ repoUrl: "http://localhost:4100" }).url, null);
+    // Same host but plain HTTP would send the key in the clear.
+    assert.equal(trustedRegistryUrl({ repoUrl: "http://gw.corp.dev:8080", gatewayUrl: "https://gw.corp.dev" }).url, null);
+    assert.equal(trustedRegistryUrl({ repoUrl: "https://gw.corp.dev/registry", gatewayUrl: "https://gw.corp.dev" }).url, "https://gw.corp.dev/registry");
   });
 
   it("doesn't report to a registry a branch pointed elsewhere, and says why", async () => {
@@ -193,50 +196,22 @@ describe("commit trailer", () => {
     assert.equal(readFileSync(message, "utf8"), "Merge branch 'main'\n");
   });
 
-  it("runs a copy of the CLI from the git directory, which a branch checkout can't change", () => {
-    const root = productRepo("jane/eng-45-x");
-    mkdirSync(path.join(root, ".tokens-per-ticket"), { recursive: true });
-    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// trusted build\n");
-    assert.equal(refreshTrustedCli(root, { replace: false }), "updated");
-    const copy = trustedCliPath(root) ?? "";
-    assert.equal(realpath(path.dirname(path.dirname(copy))), realpath(path.join(root, ".git")));
-    assert.equal(readFileSync(copy, "utf8"), "// trusted build\n");
-    assert.equal(refreshTrustedCli(root, { replace: false }), "current");
-
-    // A branch swaps the checkout's bundle: hooks neither copy nor run it.
-    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// from an untrusted branch\n");
-    assert.equal(refreshTrustedCli(root, { replace: false }), "differs");
-    assert.equal(readFileSync(copy, "utf8"), "// trusted build\n");
-    assert.match(HOOK_SCRIPT, /--git-common-dir/);
-    assert.doesNotMatch(HOOK_SCRIPT, /show-toplevel/);
-
-    // Only an explicit init switches to the checkout's CLI.
-    assert.equal(refreshTrustedCli(root, { replace: true }), "updated");
-    assert.equal(readFileSync(copy, "utf8"), "// from an untrusted branch\n");
-  });
-
-  it("Claude Code hooks run the trusted copy, falling back to the checkout only before one exists", () => {
+  it("both hooks run the checkout's committed CLI", () => {
     const root = productRepo("jane/eng-46-x");
     mkdirSync(path.join(root, ".tokens-per-ticket"), { recursive: true });
-    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), 'console.log("ran checkout copy")\n');
-    const run = () => execFileSync("sh", ["-c", HOOK_COMMAND], { cwd: os.tmpdir(), env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8" }).trim();
-
-    assert.equal(run(), "ran checkout copy");
-    const copy = trustedCliPath(root) ?? "";
-    mkdirSync(path.dirname(copy), { recursive: true });
-    writeFileSync(copy, 'console.log("ran trusted copy")\n');
-    assert.equal(run(), "ran trusted copy");
+    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), 'console.log("ran", process.argv[2])\n');
+    const run = (script: string, args: string[] = []) =>
+      execFileSync("sh", ["-c", script, "hook", ...args], { cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8" }).trim();
+    assert.equal(run(HOOK_COMMAND), "ran hook");
+    assert.equal(run(HOOK_SCRIPT, ["MSG"]), "ran git-trailer");
   });
 
-  it("tells the session when a branch carries a different CLI, without switching to it", async () => {
-    const root = productRepo("jane/eng-47-x");
-    mkdirSync(path.join(root, ".tokens-per-ticket"), { recursive: true });
-    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// v1\n");
-    refreshTrustedCli(root, { replace: true });
-    writeFileSync(path.join(root, ".tokens-per-ticket/tpt.mjs"), "// v2 from a branch\n");
-    const output = await handleHook({ hook_event_name: "SessionStart", session_id: "s-cli", cwd: root }, connected, recorder().deps);
-    assert.match(output.systemMessage ?? "", /different \.tokens-per-ticket\/tpt\.mjs than the copy the hooks run/);
-    assert.equal(readFileSync(trustedCliPath(root) ?? "", "utf8"), "// v1\n");
+  it("doesn't tell Claude the session counts toward a ticket when the report failed", async () => {
+    const root = productRepo("jane/eng-48-x");
+    const { deps } = recorder(false);
+    const output = await handleHook({ hook_event_name: "SessionStart", session_id: "s-fail", cwd: root }, connected, deps);
+    assert.doesNotMatch(output.hookSpecificOutput?.additionalContext ?? "", /count toward ticket/);
+    assert.match(output.hookSpecificOutput?.additionalContext ?? "", /isn't attributed to ENG-48 yet/);
   });
 
   it("installs the git hook, and never overwrites someone else's", () => {
