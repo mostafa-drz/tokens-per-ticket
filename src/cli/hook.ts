@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { CONTRACT_FILE, findTicketKey, keyFromTag, loadContract, type TicketContract } from "../lib/contract.ts";
 import { reportSession, type SessionReport } from "../lib/registry-client.ts";
 import { ensureCommitTrailerHook } from "./git-trailer.ts";
@@ -64,14 +65,22 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
   const cwd = input.new_cwd ?? input.cwd ?? process.cwd();
 
   const root = git(["rev-parse", "--show-toplevel"], cwd);
-  if (!root || !existsSync(path.join(root, CONTRACT_FILE))) {
-    // Not a repo that adopted tokens-per-ticket (or not a repo at all). A
-    // session that moved here from a ticket must stop counting toward it.
-    if (event === "CwdChanged" && input.session_id) {
-      const left = await leaveTicket(input.session_id, env, { report, stateDir, now });
-      if (left) return withEvent(event, { systemMessage: `tokens-per-ticket: this directory isn't set up for tokens-per-ticket, so the session no longer counts toward ${left}.` });
+  // Only the project Claude Code was started in (or a worktree of it) is
+  // trusted: a directory the session merely moves into doesn't get to name a
+  // registry for the key, or install a git hook.
+  if (!root || !existsSync(path.join(root, CONTRACT_FILE)) || !sameRepo(root, env.CLAUDE_PROJECT_DIR)) {
+    // Not set up here: another repo, or a branch from before adoption. A
+    // session that was on a ticket must stop counting toward it.
+    const headPath = root ? git(["rev-parse", "--path-format=absolute", "--git-path", "HEAD"], cwd) : "";
+    const watchPaths = event === "FileChanged" && headPath ? [headPath] : undefined;
+    const left = input.session_id ? await leaveTicket(input.session_id, env, { report, stateDir, now }) : null;
+    if (left) {
+      return withEvent(event, {
+        watchPaths,
+        systemMessage: `tokens-per-ticket: ${root ? "this checkout isn't set up for tokens-per-ticket" : "this directory isn't a git repository"}, so the session no longer counts toward ${left}.`,
+      });
     }
-    return event === "SessionStart" || event === "CwdChanged" ? withEvent(event, {}) : {};
+    return event === "SessionStart" || event === "CwdChanged" || watchPaths ? withEvent(event, { watchPaths }) : {};
   }
 
   let contract: TicketContract;
@@ -91,6 +100,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
 
   const startEvent = event === "SessionStart" || event === "CwdChanged";
   if (startEvent) ensureCommitTrailerHook(root, contract);
+  if (event === "SessionStart") keepFallbackCopy(stateDir, now);
 
   const title = event === "SessionStart" && ticket && !input.session_title && input.source !== "clear" && input.source !== "compact" ? ticket : undefined;
 
@@ -273,6 +283,37 @@ function defaultStateDir(): string {
   return path.join(base, "tokens-per-ticket", "sessions");
 }
 
+/** Whether `root` is the project's repository, or a worktree of it. */
+function sameRepo(root: string, projectDir: string | undefined): boolean {
+  if (!projectDir) return true;
+  const common = (dir: string) => git(["rev-parse", "--path-format=absolute", "--git-common-dir"], dir);
+  const project = common(projectDir);
+  return Boolean(project) && project === common(root);
+}
+
+/**
+ * Keeps a copy of this CLI next to the session state, for HOOK_COMMAND to run
+ * when the checkout has none (a branch from before adoption), so the hook can
+ * still stop charging the previous ticket. Also drops state older than 30 days.
+ */
+function keepFallbackCopy(sessionsDir: string, now: () => number): void {
+  try {
+    const self = fileURLToPath(import.meta.url);
+    const copy = path.join(path.dirname(sessionsDir), "tpt.mjs");
+    if (self.endsWith(".mjs") && (!existsSync(copy) || !readFileSync(copy).equals(readFileSync(self)))) {
+      mkdirSync(path.dirname(copy), { recursive: true, mode: 0o700 });
+      rmSync(copy, { force: true });
+      copyFileSync(self, copy);
+    }
+    for (const name of existsSync(sessionsDir) ? readdirSync(sessionsDir) : []) {
+      const file = path.join(sessionsDir, name);
+      if (now() - statSync(file).mtimeMs > 30 * 86_400_000) rmSync(file, { force: true });
+    }
+  } catch {
+    // Best effort: without the copy, a pre-adoption branch keeps the last ticket.
+  }
+}
+
 function safe(id: string): string {
   return id.replace(/[^A-Za-z0-9_-]/g, "_");
 }
@@ -282,11 +323,12 @@ function firstLine(error: unknown): string {
 }
 
 /**
- * Claude Code settings entries for the hook, merged by `init`. Claude Code
- * exports CLAUDE_PROJECT_DIR to hook processes.
- * https://code.claude.com/docs/en/hooks
+ * Claude Code settings entries for the hook, merged by `init`. Runs the
+ * checkout's committed CLI; on a branch from before adoption, which has none,
+ * the copy kept next to the session state. Claude Code exports
+ * CLAUDE_PROJECT_DIR to hook processes. https://code.claude.com/docs/en/hooks
  */
-export const HOOK_COMMAND = `node "$CLAUDE_PROJECT_DIR/${BUNDLE_PATH}" hook`;
+export const HOOK_COMMAND = `f="$CLAUDE_PROJECT_DIR/${BUNDLE_PATH}"; [ -f "$f" ] || f="\${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs"; [ -f "$f" ] || exit 0; node "$f" hook`;
 
 export function hookSettings(): Record<string, unknown[]> {
   const handler = { type: "command", command: HOOK_COMMAND };

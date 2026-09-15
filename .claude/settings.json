@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\" hook"
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || f=\"${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || exit 0; node \"$f\" hook"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\" hook"
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || f=\"${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || exit 0; node \"$f\" hook"
           }
         ]
       }
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\" hook"
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || f=\"${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || exit 0; node \"$f\" hook"
           }
         ]
       }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\" hook"
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || f=\"${XDG_STATE_HOME:-$HOME/.local/state}/tokens-per-ticket/tpt.mjs\"; [ -f \"$f\" ] || exit 0; node \"$f\" hook"
           }
         ]
       }

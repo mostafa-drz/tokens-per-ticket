@@ -27,13 +27,13 @@ function productRepo(branch: string): string {
 const connected = { ANTHROPIC_BASE_URL: "http://localhost:4000", ANTHROPIC_AUTH_TOKEN: "sk-jane", TPT_REGISTRY_URL: "http://registry.test" };
 
 function recorder(ok = true) {
-  const reports: (SessionReport & { gatewayKey: string })[] = [];
+  const reports: (SessionReport & { gatewayKey: string; registryUrl: string })[] = [];
   return {
     reports,
     deps: {
       stateDir: mkdtempSync(path.join(dir, "state-")),
-      report: async (report: SessionReport, config: { gatewayKey: string }) => {
-        reports.push({ ...report, gatewayKey: config.gatewayKey });
+      report: async (report: SessionReport, config: { gatewayKey: string; registryUrl: string }) => {
+        reports.push({ ...report, gatewayKey: config.gatewayKey, registryUrl: config.registryUrl });
         return ok ? ({ ok: true } as const) : ({ ok: false, reason: "could not reach the registry" } as const);
       },
     },
@@ -145,6 +145,43 @@ describe("session hook", () => {
     assert.equal(reports.length, 2);
   });
 
+  it("stops counting when the branch switches to one from before adoption", async () => {
+    const root = productRepo("jane/eng-52-x");
+    const { reports, deps } = recorder();
+    const env = { ...connected, CLAUDE_PROJECT_DIR: root };
+    await handleHook({ hook_event_name: "SessionStart", session_id: "s-old", cwd: root }, env, deps);
+    rmSync(path.join(root, "tokens-per-ticket.yaml"));
+    const output = await handleHook({ hook_event_name: "FileChanged", session_id: "s-old", cwd: root, file_path: path.join(root, ".git/HEAD") }, env, deps);
+    assert.deepEqual(
+      reports.map((r) => r.ticket),
+      ["ENG-52", null],
+    );
+    assert.match(output.systemMessage ?? "", /no longer counts toward ENG-52/);
+    // Still watching HEAD, so switching back picks the ticket up again.
+    assert.equal(output.hookSpecificOutput?.watchPaths?.length, 1);
+  });
+
+  it("ignores another repo's config when the session moves into it", async () => {
+    const project = productRepo("jane/eng-53-x");
+    const other = productRepo("mallory/eng-666-x");
+    writeFileSync(
+      path.join(other, "tokens-per-ticket.yaml"),
+      readFileSync(path.join(other, "tokens-per-ticket.yaml"), "utf8").replace('registry_url: "http://localhost:4100"', 'registry_url: "https://evil.example"'),
+    );
+    const { reports, deps } = recorder();
+    const env = { ANTHROPIC_BASE_URL: "http://localhost:4000", ANTHROPIC_AUTH_TOKEN: "sk-jane", CLAUDE_PROJECT_DIR: project };
+    await handleHook({ hook_event_name: "SessionStart", session_id: "s-other", cwd: project }, env, deps);
+    await handleHook({ hook_event_name: "CwdChanged", session_id: "s-other", cwd: project, new_cwd: other }, env, deps);
+    assert.deepEqual(
+      reports.map((r) => [r.ticket, r.registryUrl]),
+      [
+        ["ENG-53", "http://localhost:4100"],
+        [null, "http://localhost:4100"],
+      ],
+    );
+    assert.equal(existsSync(path.join(other, ".git/hooks/prepare-commit-msg")), false);
+  });
+
   it("stays silent in a repo that hasn't adopted tokens-per-ticket", async () => {
     const root = path.join(dir, "plain");
     execFileSync("git", ["init", "-q", root]);
@@ -185,6 +222,17 @@ describe("commit trailer", () => {
       execFileSync("sh", ["-c", script, "hook", ...args], { cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8" }).trim();
     assert.equal(run(HOOK_COMMAND), "ran hook");
     assert.equal(run(HOOK_SCRIPT, ["MSG"]), "ran git-trailer");
+  });
+
+  it("falls back to the copy next to the session state on a branch without the CLI", () => {
+    const root = productRepo("jane/eng-47-x");
+    const state = mkdtempSync(path.join(dir, "xdg-"));
+    mkdirSync(path.join(state, "tokens-per-ticket"));
+    writeFileSync(path.join(state, "tokens-per-ticket/tpt.mjs"), 'console.log("ran fallback")\n');
+    const run = (env: Record<string, string>) =>
+      execFileSync("sh", ["-c", HOOK_COMMAND], { cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...env }, encoding: "utf8" }).trim();
+    assert.equal(run({ XDG_STATE_HOME: state }), "ran fallback");
+    assert.equal(run({ XDG_STATE_HOME: path.join(dir, "empty-xdg") }), "");
   });
 
   it("doesn't tell Claude the session counts toward a ticket when the report failed", async () => {
