@@ -1,9 +1,8 @@
 # LiteLLM proxy config for development traffic.
 #
-# Nothing here is specific to tickets. Per-ticket attribution comes from the
-# x-litellm-tags header Claude Code sends (see scripts/ticket-start.ts), and
-# LiteLLM already aggregates spend per tag. This file only has to route
-# models and store spend.
+# Routes models, stores spend, and loads the tokens_per_ticket plugin, which
+# tags each Claude Code call with its session's ticket from the registry.
+# LiteLLM already aggregates spend per tag.
 
 model_list:
   # Pass any Anthropic model through by name, so Claude Code's model

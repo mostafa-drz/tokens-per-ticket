@@ -62,13 +62,11 @@ class _Client:
         self.fail = fail
         self.calls = 0
 
-    async def get(self, url, params=None, headers=None):
+    async def get(self, url, headers=None):
         self.calls += 1
         if self.fail:
             raise ConnectionError("registry down")
-        session_id = url.rsplit("/", 1)[1]
-        agent = (params or {}).get("agent_id")
-        record = self.records.get((session_id, agent)) or self.records.get((session_id, None))
+        record = self.records.get(url.rsplit("/", 1)[1])
         return _Response(200, record) if record else _Response(404)
 
 
@@ -77,10 +75,8 @@ class _Key:
         self.token = token
 
 
-def request(session_id="s1", agent_id=None, tags=None):
+def request(session_id="s1", tags=None):
     headers = {"X-Claude-Code-Session-Id": session_id}
-    if agent_id:
-        headers["x-claude-code-agent-id"] = agent_id
     return {"proxy_server_request": {"headers": headers}, "metadata": {"tags": list(tags or [])}}
 
 
@@ -97,11 +93,11 @@ class SessionTicketTaggerTest(unittest.TestCase):
         return result["metadata"]["tags"], client
 
     def test_tags_the_call_with_the_sessions_ticket(self):
-        tags, _ = self.run_hook(self.jane_token, request(tags=["User-Agent: claude-cli"]), {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
+        tags, _ = self.run_hook(self.jane_token, request(tags=["User-Agent: claude-cli"]), {"s1": {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
         self.assertEqual(tags, ["User-Agent: claude-cli", "ticket:ENG-1"])
 
     def test_refuses_a_request_that_sets_its_own_ticket_tag(self):
-        records = {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}}
+        records = {"s1": {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}}
         for data in (
             request(tags=["ticket:ENG-999"]),
             {**request(), "proxy_server_request": {"headers": {"X-LiteLLM-Tags": "team:web, ticket:ENG-999"}}},
@@ -122,14 +118,14 @@ class SessionTicketTaggerTest(unittest.TestCase):
         self.assertIs(result, data)
 
     def test_other_client_tags_are_fine(self):
-        tags, _ = self.run_hook(self.jane_token, request(tags=["team:web"]), {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
+        tags, _ = self.run_hook(self.jane_token, request(tags=["team:web"]), {"s1": {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
         self.assertEqual(tags, ["team:web", "ticket:ENG-1"])
 
     def test_tags_the_logging_copy_litellm_records_spend_from(self):
         data = request(tags=["team:web"])
         logging_obj = types.SimpleNamespace(model_call_details={"litellm_params": {"metadata": {"tags": ["team:web"]}, "litellm_metadata": {"tags": ["team:web"]}}})
         data["litellm_logging_obj"] = logging_obj
-        self.run_hook(self.jane_token, data, {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
+        self.run_hook(self.jane_token, data, {"s1": {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
         params = logging_obj.model_call_details["litellm_params"]
         self.assertEqual(params["metadata"]["tags"], ["team:web", "ticket:ENG-1"])
         self.assertEqual(params["litellm_metadata"]["tags"], ["team:web", "ticket:ENG-1"])
@@ -144,24 +140,27 @@ class SessionTicketTaggerTest(unittest.TestCase):
         self.assertEqual(logging_obj.model_call_details["litellm_params"]["metadata"]["tags"], ["team:web"])
 
     def test_another_keys_call_is_not_tagged(self):
-        tags, _ = self.run_hook(self.omar_token, request(), {("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
+        tags, _ = self.run_hook(self.omar_token, request(), {"s1": {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}})
         self.assertEqual(tags, [])
 
-    def test_a_subagents_own_record_wins_over_the_session(self):
-        records = {
-            ("s1", None): {"ticket": "ENG-1", "key_fingerprint": self.jane_fp},
-            ("s1", "agent-7"): {"ticket": "ENG-2", "key_fingerprint": self.jane_fp},
-        }
-        tags, _ = self.run_hook(self.jane_token, request(agent_id="agent-7"), records)
-        self.assertEqual(tags, ["ticket:ENG-2"])
-        tags, _ = self.run_hook(self.jane_token, request(agent_id="agent-8"), records)
+    def test_backs_off_after_repeated_failures_and_keeps_serving_known_sessions(self):
+        records = {"s1": {"ticket": "ENG-1", "key_fingerprint": self.jane_fp}}
+        tags, _ = self.run_hook(self.jane_token, request(), records)
         self.assertEqual(tags, ["ticket:ENG-1"])
+        self.plugin.cache_seconds = 0  # force lookups from here on
+        self.plugin._cache["s1"] = (0.0, records["s1"])
+        for _ in range(3):
+            tags, client = self.run_hook(self.jane_token, request(session_id="s2"), {}, fail=True)
+            self.assertEqual((tags, client.calls), ([], 1))
+        # Backing off: no new lookups, but the known session is still tagged.
+        tags, client = self.run_hook(self.jane_token, request(), {}, fail=True)
+        self.assertEqual((tags, client.calls), (["ticket:ENG-1"], 0))
 
-    def test_a_registry_outage_is_skipped_after_the_first_failure(self):
-        tags, first = self.run_hook(self.jane_token, request(), {}, fail=True)
-        self.assertEqual((tags, first.calls), ([], 1))
-        _, second = self.run_hook(self.jane_token, request(), {}, fail=True)
-        self.assertEqual(second.calls, 0)
+    def test_a_padded_or_capitalized_ticket_tag_is_still_refused(self):
+        for tag in (" ticket:ENG-999", "Ticket:ENG-999"):
+            data = {**request(), "tags": [tag]}
+            result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, data, "anthropic_messages"))
+            self.assertIsInstance(result, str)
 
 
 if __name__ == "__main__":
