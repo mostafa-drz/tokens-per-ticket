@@ -110,7 +110,7 @@ Locally, `pnpm gateway:up` runs all three. For a team, deploy LiteLLM with Postg
 Automatic attribution needs two more things next to LiteLLM:
 
 - **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it the same Postgres (`DATABASE_URL`; it creates its own `tpt_*` tables) and a shared secret `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS, ideally on the gateway's host; the gateway plugin calls it on the internal network.
-- **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout, and never blocks a call.
+- **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout. After a registry error it skips lookups for 15 seconds, so an outage costs attribution, not latency. The only calls it refuses are ones that set their own `ticket:` tag.
 
 If you already run LiteLLM for your product, you can point development traffic at the same gateway, but check three things first:
 
@@ -215,12 +215,12 @@ When something is off, the hook says so once, in one line: Claude Code isn't poi
 
 ```bash
 node .tokens-per-ticket/tpt.mjs report                  # the current branch's ticket, last 30 days
-node .tokens-per-ticket/tpt.mjs report ENG-123 --post   # also create or update the Linear comment
+node .tokens-per-ticket/tpt.mjs report ENG-123 --post   # also create or update the comment on the ticket
 ```
 
 In this repo, `pnpm ticket:report` does the same. The report reads `LITELLM_BASE_URL` and `LITELLM_API_KEY` from `.env.local` (see `.env.example`), and `LINEAR_API_KEY` for `--post`. That key reads the whole organization's spend (see [step 2](#2-give-each-developer-a-key)), so don't copy it to every laptop. Run `report --post` from one place that holds it, such as a CI job at PR time, and let engineers use the ledger.
 
-`--post` writes to Linear only (`tracker: linear`), and keeps exactly one report comment per ticket, updated on every run. With any other tracker, run the report without `--post` and paste it into the ticket.
+`--post` writes to the tracker named in `tokens-per-ticket.yaml`: `tracker: linear` (needs `LINEAR_API_KEY`) or `tracker: jira` (Jira Cloud, needs `JIRA_BASE_URL`, `JIRA_EMAIL`, and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens) in `JIRA_API_TOKEN`). It keeps exactly one report comment per ticket, written by that account and updated on every run, and never edits anyone else's comment. For other trackers, run the report without `--post` and paste it in.
 
 ![A ticket in the ledger: spend per day and by model](docs/ticket.png)
 
@@ -232,7 +232,7 @@ To work two tickets side by side, `tpt start` gives each one its own worktree an
 node .tokens-per-ticket/tpt.mjs start ENG-124 "retry on 429"   # or /ticket-start, or pnpm ticket:start here
 ```
 
-It names the branch from the contract, creates the worktree next to the repo without touching your checkout, and launches `claude` there with an explicit `x-litellm-tags: ticket:ENG-124` header. An explicit ticket tag takes precedence over the registry, so that session stays on ENG-124 whatever its branch does. Use `--print` to get the command instead of launching, and `--base origin/main` to choose where the branch starts. It also works without the registry.
+It names the branch from the contract, creates the worktree next to the repo without touching your checkout, and launches `claude` there named `ENG-124`. With the registry on, the worktree's branch attributes the session like any other. Without a registry, it passes an explicit `x-litellm-tags: ticket:ENG-124` header instead. Use `--print` to get the command instead of launching, and `--base origin/main` to choose where the branch starts.
 
 ---
 
@@ -241,7 +241,7 @@ It names the branch from the contract, creates the worktree next to the repo wit
 `tokens-per-ticket.yaml` is the one file a team edits:
 
 ```yaml
-tracker: linear                       # where report --post writes (Linear only)
+tracker: linear                       # where report --post writes: linear or jira
 key:
   pattern: "[A-Z][A-Z0-9]*-[0-9]+"   # how your tracker prints keys
   teams: []                           # optional allowlist, e.g. [ENG, AIS]
@@ -281,7 +281,7 @@ It has one AI feature, **Review spend**. A model reads a ticket's numbers and po
 | `LEDGER_REVIEW_MODEL` | Model for Review spend, e.g. `claude-haiku-4-5`. Empty turns the feature off. In production it also needs `LEDGER_BASIC_AUTH`, because each click spends tokens. |
 | `LEDGER_REVIEW_API_KEY` | The [budgeted key](#2-give-each-developer-a-key) Review spend calls the model with. Falls back to `LITELLM_API_KEY`, which is only right locally. |
 | `LEDGER_BASIC_AUTH` | `user:password`. Required in production when `LEDGER_DATA=litellm`. |
-| `LINEAR_API_KEY` | Only for `tpt report --post` |
+| `LINEAR_API_KEY`, or `JIRA_BASE_URL` + `JIRA_EMAIL` + `JIRA_API_TOKEN` | Only for `tpt report --post` |
 
 ### Deploying
 
@@ -302,7 +302,7 @@ To deploy against a real gateway:
 Everything lives in the repo and is committed, so the whole team gets it:
 
 - **Hooks.** In `.claude/settings.json`, `SessionStart`, `UserPromptSubmit`, `FileChanged`, and `CwdChanged` all run `tpt hook` (source: `src/cli/hook.ts`), from the copy of the CLI kept in `.git`. The hook reports the session, keeps `.git/HEAD` watched, names the session after its ticket unless you named it yourself, and warns once when something is missing. It never blocks. Each run takes about 60 ms, and it only calls the registry when something changed or every 10 minutes.
-- **`/ticket-cost`** runs the report and adds up to three observations the numbers support. It posts to Linear only when you ask.
+- **`/ticket-cost`** runs the report and adds up to three observations the numbers support. It posts to the tracker only when you ask.
 - **`/ticket-start ENG-123 title`** prepares a separate worktree and gives you the command to paste.
 
 ---
@@ -320,10 +320,12 @@ Everything lives in the repo and is committed, so the whole team gets it:
 - **When tags can be wrong for a moment.**
   - The plugin caches a session for 2 seconds.
   - A `FileChanged` event can arrive a moment after the call that followed the switch.
-  - A registry outage, a timeout, or a missing key means untagged spend, never a failed call.
-- **Explicit beats automatic.** A request that already carries a `ticket:` tag, like one from `tpt start`, keeps it.
+  - A registry outage, a timeout, or a missing key means untagged spend, never a failed call. The *Attributed* figure in the ledger shows the gap.
+- **Only the gateway sets tickets.** With the plugin on, a request that sets its own `ticket:` tag (in `x-litellm-tags` or the body) is refused with a clear 400, so a key can't charge its spend to someone else's ticket. Other tags pass through. The plugin writes the ticket both to the request and to the metadata copy LiteLLM's spend logging reads, which on `/v1/messages` is taken before plugins run (checked on `v1.100.1`).
+- **Subagents keep their own ticket.** Subagents share their session's id, so hooks that fire inside a subagent report for that subagent (`agent_id`), and the plugin looks up `x-claude-code-agent-id` first. A subagent working in another worktree doesn't move the main session's spend.
+- **Unattributed spend is visible.** The ledger's *Attributed* figure compares ticket spend with all Claude Code spend, taken from the `User-Agent: claude-cli` tag LiteLLM adds to every Claude Code call. Work on `main`, or from a session that isn't connected to the registry, shows up as the gap.
 - **Tag budgets don't see automatic tags.** LiteLLM checks tag budgets during auth, before the plugin adds the tag. Spend tracking is unaffected. Budgets per key and per team work as usual, and `x-litellm-tags` headers are merged before that check ([tag budgets](https://docs.litellm.ai/docs/proxy/tag_budgets)).
-- **Claude Code only, for now.** Other tools can't be attributed by session. They can still send `x-litellm-tags` themselves.
+- **Scope: Claude Code behind LiteLLM, on purpose.** That's where per-request session ids and a pluggable gateway exist today. Other tools (Cursor, Codex) and other gateways (Claude apps gateway, Portkey) aren't attributed. The hooks' session timeline in `tpt_session_events` is gateway-agnostic, so an adapter that joins it with another gateway's logs or Claude Code's OpenTelemetry `session.id` is the natural extension.
 - **Spend is written in batches.** Calls from the last minute or so may not show yet.
 - **LiteLLM adds its own tags.** Every request is also tagged with its `User-Agent`, so one request appears under several tags. The ledger reads per-tag breakdowns and never adds a day's totals across tags, to avoid counting the same request twice.
 - **"Input tokens" include cache reads and writes.** LiteLLM folds Anthropic's cache tokens into `prompt_tokens`, so the cache share is cache reads ÷ input tokens.
@@ -338,7 +340,8 @@ Everything lives in the repo and is committed, so the whole team gets it:
 ```bash
 pnpm dev             # ledger on :3000
 pnpm test:unit       # node:test via tsx, including responses recorded from a real gateway
-pnpm test:registry   # the session registry
+pnpm test:registry   # the session registry (set TPT_TEST_DATABASE_URL to include the Postgres migration test)
+pnpm test:gateway    # the LiteLLM plugin (Python, no LiteLLM needed)
 pnpm test:e2e        # Playwright on :3100, desktop + phone, sample data
 pnpm build:cli       # rebuild .tokens-per-ticket/tpt.mjs after changing src/cli or src/lib
 pnpm typecheck

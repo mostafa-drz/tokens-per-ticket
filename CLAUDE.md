@@ -18,6 +18,7 @@ pnpm lint
 pnpm gateway:up     # LiteLLM + plugin + registry + Postgres (:4000, :4100)
 pnpm gateway:smoke  # prove tagged spend flows
 pnpm test:registry  # the session registry
+pnpm test:gateway   # the LiteLLM plugin
 pnpm build:cli      # rebuild .tokens-per-ticket/tpt.mjs
 ```
 
