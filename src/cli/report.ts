@@ -50,16 +50,17 @@ export async function runReport(argv: string[]): Promise<void> {
     process.exit(0);
   }
 
-  // A stray second positional is usually the value of a flag npm ate
-  // (`--days 60` before `--`). Refuse it rather than use the default.
+  // A stray second positional is usually a flag's value written without its
+  // flag. Refuse it rather than use the default.
   if (positionals.length > 1) fail(`Unexpected argument "${positionals[1]}".\n\n${USAGE}`);
 
   const mainRoot = mainCheckoutRoot();
   // Ticket worktrees have no .env.local of their own (it's gitignored).
   const here = tryGit(["rev-parse", "--show-toplevel"]) ?? process.cwd();
-  loadEnvLocal([here, mainRoot]);
+  loadEnvLocal(mainRoot ? [here, mainRoot] : [here]);
   const contract =
-    loadFirstContract([here, mainRoot]) ?? fail(`No ${CONTRACT_FILE} in this checkout. Run this on a branch that has adopted tokens-per-ticket.`);
+    loadFirstContract([here, mainRoot]) ??
+    fail(`No ${CONTRACT_FILE} here. Run this inside a repository (on a branch) that has adopted tokens-per-ticket.`);
   const branch = values.branch ?? currentBranch();
   const key = positionals[0]
     ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key${contract.key.teams.length ? ` for teams ${contract.key.teams.join(", ")} (key.teams in ${CONTRACT_FILE})` : ""}.`))

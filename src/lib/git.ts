@@ -18,8 +18,8 @@ export function currentBranch(cwd?: string): string | null {
   return branch || null;
 }
 
-/** The main checkout's root, even when called from inside a linked worktree. */
-export function mainCheckoutRoot(cwd?: string): string {
-  const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd);
-  return path.dirname(commonDir);
+/** The main checkout's root, even from inside a linked worktree. Null outside a repository. */
+export function mainCheckoutRoot(cwd?: string): string | null {
+  const commonDir = tryGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd);
+  return commonDir ? path.dirname(commonDir) : null;
 }
