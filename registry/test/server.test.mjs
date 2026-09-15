@@ -54,6 +54,19 @@ describe("registry", () => {
     assert.match((await taken.json()).error, /Start a new Claude Code session/);
   });
 
+  it("stops querying keys once the lookup budget is spent, and says to retry", async () => {
+    const busy = createServer({ store: memoryStore({ tokens: new Set([sha("sk-jane")]) }), internalToken: "gw-secret", lookups: rateLimiter({ limit: 2 }) });
+    await new Promise((resolve) => busy.listen(0, resolve));
+    const url = `http://127.0.0.1:${busy.address().port}/v1/sessions`;
+    const post = (key) => fetch(url, { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: JSON.stringify({ session_id: "s-b", ticket: "ENG-1" }) });
+    assert.equal((await post("sk-made-up-1")).status, 401);
+    assert.equal((await post("sk-made-up-2")).status, 401);
+    const refused = await post("sk-made-up-3");
+    assert.equal(refused.status, 503);
+    assert.match((await refused.json()).error, /Try again/);
+    busy.close();
+  });
+
   it("serves lookups only to the gateway", async () => {
     assert.equal((await lookup("s-1", "sk-jane")).status, 401);
     assert.equal((await lookup("unknown-session")).status, 404);

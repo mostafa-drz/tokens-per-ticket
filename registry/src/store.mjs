@@ -7,7 +7,8 @@
 export function memoryStore({ tokens = null } = {}) {
   const sessions = new Map();
   return {
-    async isActiveToken(token) {
+    async isActiveToken(token, { canQuery = () => true } = {}) {
+      if (!canQuery()) return null;
       return tokens ? tokens.has(token) : true;
     },
     async get(sessionId) {
@@ -67,11 +68,13 @@ export async function postgresStore(pool, { schema = "tpt", retentionDays = 90, 
     /**
      * True when `token` (sha256 of a virtual key, as LiteLLM stores it) is an
      * active key in "LiteLLM_VerificationToken". Looked up by primary key and
-     * cached briefly, so a flood of unknown keys costs index lookups, not scans.
+     * cached briefly. Returns null without querying when `canQuery` says the
+     * lookup budget is spent, so a flood of made-up keys can't reach Postgres.
      */
-    async isActiveToken(token) {
+    async isActiveToken(token, { canQuery = () => true } = {}) {
       const hit = tokenCache.get(token);
       if (hit && hit.expires > Date.now()) return hit.active;
+      if (!canQuery()) return null;
       const { rows } = await pool.query(
         `SELECT 1 FROM "LiteLLM_VerificationToken"
           WHERE token = $1 AND (blocked IS NOT TRUE) AND (expires IS NULL OR expires > now())`,

@@ -26,7 +26,15 @@ const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const TICKET = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_BODY_BYTES = 8 * 1024;
 
-export function createServer({ store, internalToken, log = () => {}, limiter = rateLimiter() }) {
+export function createServer({
+  store,
+  internalToken,
+  log = () => {},
+  limiter = rateLimiter(),
+  // Key lookups that miss the cache, across all callers. Hooks for a few hundred
+  // engineers stay far below it; a flood of made-up keys hits it and waits.
+  lookups = rateLimiter({ limit: 3000, windowMs: 60_000 }),
+}) {
   if (!internalToken) throw new Error("TPT_REGISTRY_TOKEN is required, so only the gateway can read sessions.");
 
   return http.createServer(async (req, res) => {
@@ -39,7 +47,9 @@ export function createServer({ store, internalToken, log = () => {}, limiter = r
         // LiteLLM virtual keys start with sk-; anything else is refused before touching the database.
         if (!key?.startsWith("sk-")) return send(res, 401, { error: "Send your LiteLLM virtual key as Authorization: Bearer <key>." });
         const keyToken = createHash("sha256").update(key).digest("hex");
-        if (!(await store.isActiveToken(keyToken))) {
+        const active = await store.isActiveToken(keyToken, { canQuery: () => lookups("all") });
+        if (active === null) return send(res, 503, { error: "The registry is busy checking keys. Try again in a minute." });
+        if (!active) {
           return send(res, 401, { error: "This key isn't an active LiteLLM virtual key (the master key can't be attributed)." });
         }
         if (!limiter(keyToken)) return send(res, 429, { error: "Too many reports for this key. Slow down." });
