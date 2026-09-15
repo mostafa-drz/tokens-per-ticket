@@ -97,7 +97,7 @@ pnpm dev                                  # the ledger on :3000 (sample data)
 
 To see your gateway's numbers in the ledger instead of sample data, set `LEDGER_DATA=litellm` in `.env.local` and restart `pnpm dev`.
 
-The smoke test runs the automatic path the way Claude Code and the hooks do. It creates a temporary virtual key, reports two sessions to the registry, and calls `mock-ticket-model` with only the session id. Then it checks that the gateway attributed the spend to each session's ticket. The mock model returns a canned answer but still gets tokens counted and priced, so the whole loop runs without an Anthropic key.
+The smoke test runs the automatic path the way the hooks do. It creates a temporary virtual key, reports two sessions to the registry, and calls `mock-ticket-model` with only the session id. Then it checks that the gateway attributed the spend to each session's ticket. The mock model returns a canned answer but still gets tokens counted and priced, so the whole loop runs without an Anthropic key. It calls `/v1/chat/completions`, the only route where LiteLLM prices a mock; Claude Code uses `/v1/messages`, where the same tags land but the mock costs $0. Before rollout, check one real Claude Code session with a provider key.
 
 ---
 
@@ -110,7 +110,7 @@ Locally, `pnpm gateway:up` runs all three. For a team, deploy LiteLLM with Postg
 Automatic attribution needs two more things next to LiteLLM:
 
 - **The session registry** (`registry/`, a small Node service with a Dockerfile). Give it **LiteLLM's own Postgres** (`DATABASE_URL`): it keeps its one table in its own `tpt` schema (LiteLLM's upgrades drop unknown tables from `public`) and reads LiteLLM's key table, so it only accepts sessions reported with an active virtual key. Also give it a shared secret, `TPT_REGISTRY_TOKEN`. Developers' hooks must be able to reach it over HTTPS; the gateway plugin calls it on the internal network.
-- **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout. After three failed lookups in a row it skips new ones for 15 seconds, so an outage costs attribution, not latency. The only calls it refuses are ones that set their own `ticket:` tag.
+- **The plugin**, `gateway/tokens_per_ticket.py`. Put it next to LiteLLM's `config.yaml`, add `callbacks: tokens_per_ticket.proxy_handler_instance` under `litellm_settings`, and set `TPT_REGISTRY_URL` and `TPT_REGISTRY_TOKEN` in LiteLLM's environment. It adds one registry lookup per model call, cached for 2 seconds with a 300 ms timeout. After three failed lookups in a row it skips new ones for 15 seconds, so an outage costs attribution, not latency. It refuses calls that set their own `ticket:` tag, and pass-through routes (see [step 2](#2-give-each-developer-a-key)).
 
 If you already run LiteLLM for your product, you can point development traffic at the same gateway, but check three things first:
 
@@ -198,9 +198,11 @@ git add tokens-per-ticket.yaml .tokens-per-ticket .claude .gitignore && git comm
 - **Hooks and permissions merged into `.claude/settings.json`**. Existing entries are kept.
 - **The `/ticket-cost` and `/ticket-start` skills.**
 - **`.env.local` in `.gitignore`**, if it isn't ignored yet. `tpt report` reads its spend key from there.
-- **A `prepare-commit-msg` git hook** for the commit trailer, in `.git/hooks` (or your `core.hooksPath`). The session hook installs it in new clones too. An existing hook, such as husky's, is never overwritten; `init` tells you the one line to add to it.
+- **A `prepare-commit-msg` git hook** for the commit trailer, in `.git/hooks`. It isn't versioned, so a fresh clone gets it at its first Claude Code session; commits made before that have no trailer. With `core.hooksPath` (husky), `init` prints the line to add instead. An existing hook, such as husky's, is never overwritten; `init` tells you the one line to add to it.
 
 Commit the files: every clone and worktree needs them.
+
+**Rolling out.** Branches opened before this commit don't have these files, so their sessions aren't attributed, and a session that switches to one stops counting (the hook says so). Merge your default branch into in-flight ticket branches to include them.
 
 ### 5. Work as usual
 
@@ -208,7 +210,7 @@ Check out a ticket branch, with Linear's "Copy git branch name" or any tool, and
 
 - **Session start.** The hook reports the session's ticket, names the session `ENG-123`, and tells Claude which ticket its work counts toward.
 - **Branch switch.** Switching with `git switch`, from Claude's Bash, or from your IDE fires a `FileChanged` event on `.git/HEAD` ([hooks](https://code.claude.com/docs/en/hooks)). The session's next calls count toward the new ticket, and you see a one-line note.
-- **Before each prompt.** A cheap re-check catches anything missed. It only calls the registry when something changed.
+- **Before each prompt.** A cheap re-check catches anything missed. It only calls the registry when something changed, or every 10 minutes.
 - **Branches outside the contract** (`main`, spikes) aren't attributed. That's the honest answer.
 - **Commits** on a ticket branch get `Ticket: ENG-123`.
 
@@ -325,7 +327,7 @@ To deploy against a real gateway:
 
 Everything lives in the repo and is committed, so the whole team gets it:
 
-- **Hooks.** In `.claude/settings.json`, `SessionStart`, `UserPromptSubmit`, `FileChanged`, and `CwdChanged` all run `tpt hook` (source: `src/cli/hook.ts`). The hook reports the session, keeps `.git/HEAD` watched, names the session after its ticket unless you named it yourself, and warns once when something is missing. It never blocks. Each run takes about 60 ms, and it only calls the registry when something changed or every 10 minutes.
+- **Hooks.** In `.claude/settings.json`, `SessionStart`, `UserPromptSubmit`, `FileChanged`, and `CwdChanged` all run `tpt hook` (source: `src/cli/hook.ts`). The hook reports the session, keeps `.git/HEAD` watched, names the session after its ticket unless you named it yourself, and warns once when something is missing. It never blocks. Each run takes 60–150 ms; it calls the registry at session start, on a branch switch, and otherwise only when something changed or every 10 minutes.
 - **`/ticket-cost`** runs the report and adds up to three observations the numbers support. It posts to the tracker only when you ask.
 - **`/ticket-start ENG-123 title`** prepares a separate worktree and gives you the command to paste.
 

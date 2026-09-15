@@ -8,7 +8,7 @@
  * Without a key, reads it from the current branch.
  */
 import { parseArgs } from "node:util";
-import { findTicketKey, loadContract, normalizeTicketKey, ticketTag } from "../lib/contract.ts";
+import { CONTRACT_FILE, findTicketKey, loadContract, normalizeTicketKey, ticketTag } from "../lib/contract.ts";
 import { loadEnvLocal } from "../lib/env.ts";
 import { currentBranch, mainCheckoutRoot, tryGit } from "../lib/git.ts";
 import { summarizeTicket } from "../lib/ledger.ts";
@@ -60,7 +60,7 @@ export async function runReport(argv: string[]): Promise<void> {
   const contract = loadContract(mainRoot);
   const branch = values.branch ?? currentBranch();
   const key = positionals[0]
-    ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key.`))
+    ? (normalizeTicketKey(positionals[0], contract) ?? fail(`"${positionals[0]}" is not a ticket key${contract.key.teams.length ? ` for teams ${contract.key.teams.join(", ")} (key.teams in ${CONTRACT_FILE})` : ""}.`))
     : ((branch && findTicketKey(branch, contract)) ?? noTicket());
 
   function noTicket(): never {

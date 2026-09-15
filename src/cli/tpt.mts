@@ -17,7 +17,8 @@ import { runStart } from "./start.ts";
 
 const USAGE = `tokens-per-ticket
 
-  init [--registry-url <url>]   Set up this repository (once)
+  init --teams <ENG,WEB> [--registry-url <url>]
+                                Set up this repository (once)
   report [KEY] [--days N] [--post]
                                 What a ticket has cost, from LiteLLM
   start KEY [title] [--print]   Optional: a worktree and session for one ticket
