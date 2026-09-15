@@ -46,6 +46,11 @@ describe("postgres store migration", { skip: !url && "set TPT_TEST_DATABASE_URL 
       `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'tpt_sessions' ORDER BY column_name`,
       [schema],
     );
-    assert.deepEqual(rows.map((r) => r.column_name), ["branch", "key_fingerprint", "repo", "session_id", "ticket", "updated_at"]);
+    assert.deepEqual(rows.map((r) => r.column_name), ["agent_id", "branch", "key_fingerprint", "repo", "session_id", "ticket", "updated_at"]);
+
+    // Subagent records live next to the session's under the new key.
+    await store.put({ session_id: "old-1", agent_id: "agent-1", key_fingerprint: sha(sha("sk-jane")), ticket: "ENG-3", branch: null, repo: null, event: "CwdChanged", head: null });
+    assert.equal((await store.get("old-1", "agent-1")).ticket, "ENG-3");
+    assert.equal((await store.get("old-1")).ticket, "ENG-2");
   });
 });

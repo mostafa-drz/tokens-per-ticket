@@ -19,6 +19,9 @@ const server = createServer({
   log: (line) => console.log(`registry: ${line}`),
 });
 
+// Retention runs at start and then every six hours.
+setInterval(() => store.prune().catch((error) => console.error(`registry: prune failed: ${error.message}`)), 6 * 3600_000).unref();
+
 const port = Number(process.env.PORT ?? 4100);
 server.listen(port, () => console.log(`registry: listening on :${port}`));
 

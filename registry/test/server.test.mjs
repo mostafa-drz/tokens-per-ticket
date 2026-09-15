@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createHash } from "node:crypto";
-import { createServer, parseReport } from "../src/server.mjs";
+import { createServer, parseReport, rateLimiter } from "../src/server.mjs";
 import { memoryStore } from "../src/store.mjs";
 
 // What hooks send: sha256(sha256(key)). The registry never sees a key.
@@ -59,6 +59,17 @@ describe("registry", () => {
     assert.equal((await report(undefined, { session_id: "s-2", ticket: "ENG-1" })).status, 400);
   });
 
+  it("keeps a subagent's ticket separate from its session's", async () => {
+    await report(JANE, { session_id: "s-3", ticket: "ENG-10", event: "SessionStart" });
+    await report(JANE, { session_id: "s-3", agent_id: "agent-1", ticket: "ENG-11", event: "CwdChanged" });
+    assert.equal((await (await lookup("s-3")).json()).ticket, "ENG-10");
+    assert.equal((await (await fetch(`${base}/v1/sessions/s-3?agent_id=agent-1`, { headers: { Authorization: "Bearer gw-secret" } })).json()).ticket, "ENG-11");
+    // A subagent without its own record counts toward the session.
+    assert.equal((await (await fetch(`${base}/v1/sessions/s-3?agent_id=agent-2`, { headers: { Authorization: "Bearer gw-secret" } })).json()).ticket, "ENG-10");
+    // Another key can't add a subagent record to someone else's session.
+    assert.equal((await report(OMAR, { session_id: "s-3", agent_id: "agent-9", ticket: "ENG-99" })).status, 403);
+  });
+
   it("serves lookups only to the gateway", async () => {
     assert.equal((await lookup("s-1", JANE)).status, 401);
     assert.equal((await lookup("unknown-session")).status, 404);
@@ -68,5 +79,15 @@ describe("registry", () => {
     assert.equal((await report(JANE, { session_id: "../etc", ticket: "ENG-1" })).status, 400);
     assert.match(parseReport("{"), /JSON/);
     assert.match(parseReport(JSON.stringify({ session_id: "s", key_fingerprint: JANE, ticket: 5 })), /ticket/);
+  });
+});
+
+describe("rateLimiter", () => {
+  it("allows a burst per window, then refuses until the window resets", () => {
+    let t = 0;
+    const allow = rateLimiter({ limit: 2, windowMs: 1000, now: () => t });
+    assert.deepEqual([allow("a"), allow("a"), allow("a"), allow("b")], [true, true, false, true]);
+    t = 1000;
+    assert.equal(allow("a"), true);
   });
 });
