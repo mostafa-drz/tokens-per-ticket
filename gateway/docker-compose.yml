@@ -20,8 +20,10 @@ services:
       # so publishing on 0.0.0.0 would hand admin access to anyone on the
       # network. A team gateway belongs behind TLS, per LiteLLM's deploy guide.
       - "127.0.0.1:4000:4000"
+    # LITELLM_MASTER_KEY, LITELLM_SALT_KEY, ANTHROPIC_API_KEY, TPT_REGISTRY_TOKEN
+    env_file:
+      - .env
     environment:
-      TPT_REGISTRY_TOKEN: ${TPT_REGISTRY_TOKEN}
       DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
       TPT_REGISTRY_URL: http://registry:4100
     volumes:

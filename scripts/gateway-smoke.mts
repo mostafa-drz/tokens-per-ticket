@@ -59,6 +59,10 @@ function fail(message: string): never {
 
 let temporaryKey: string | undefined;
 try {
+  // A gateway started without its master key accepts admin calls from anyone.
+  const unauthenticated = await fetch(new URL("/key/info", baseUrl), { headers: { Authorization: "Bearer sk-not-a-real-key" } });
+  if (unauthenticated.ok) fail("The gateway accepted a made-up key for an admin route. LITELLM_MASTER_KEY isn't reaching LiteLLM; check gateway/.env.");
+
   // Earlier runs already left SMOKE-* spend today. Only count what this run adds.
   const baseline = (await smokeRequests()).counts;
 
