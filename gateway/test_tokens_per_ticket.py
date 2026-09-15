@@ -56,13 +56,15 @@ class _Response:
 
 
 class _Client:
-    def __init__(self, records, fail=False):
+    def __init__(self, records, fail=False, delay=0.0):
         self.records = records
         self.fail = fail
+        self.delay = delay
         self.calls = 0
 
     async def get(self, url, headers=None):
         self.calls += 1
+        await asyncio.sleep(self.delay)
         if self.fail:
             raise ConnectionError("registry down")
         record = self.records.get(url.rsplit("/", 1)[1])
@@ -168,6 +170,13 @@ class SessionTicketTaggerTest(unittest.TestCase):
             self.assertEqual((tags, client.calls), ([], 0))
         tags, _ = self.run_hook(self.jane_token, request(), {"s1": {"ticket": "ENG-1", "key_token": self.jane_token}})
         self.assertEqual(tags, ["ticket:ENG-1"])
+
+    def test_a_slow_registry_is_cut_off_and_counts_as_a_failure(self):
+        self.plugin.timeout = 0.05
+        self.plugin._client = _Client({"s1": {"ticket": "ENG-1", "key_token": self.jane_token}}, delay=0.5)
+        data = request()
+        result = asyncio.run(self.plugin.async_pre_call_hook(_Key(self.jane_token), None, data, "anthropic_messages"))
+        self.assertEqual((result["metadata"]["tags"], self.plugin._failures), ([], 1))
 
     def test_a_padded_or_capitalized_ticket_tag_is_still_refused(self):
         for tag in (" ticket:ENG-999", "Ticket:ENG-999"):

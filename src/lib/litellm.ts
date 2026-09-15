@@ -118,7 +118,7 @@ export async function fetchTagActivity(
         continue;
       }
       days[index] = await fetchDay(date, query.tags, config);
-      if (date < lastChanging && !config.fetch) {
+      if (date < lastChanging && days[index] && !config.fetch) {
         if (closedDays.size >= CLOSED_DAYS_LIMIT) closedDays.clear();
         closedDays.set(cacheKey, days[index]);
       }

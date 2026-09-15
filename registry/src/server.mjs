@@ -36,7 +36,8 @@ export function createServer({ store, internalToken, log = () => {}, limiter = r
 
       if (req.method === "POST" && url.pathname === "/v1/sessions") {
         const key = bearer(req);
-        if (!key) return send(res, 401, { error: "Send your LiteLLM virtual key as Authorization: Bearer <key>." });
+        // LiteLLM virtual keys start with sk-; anything else is refused before touching the database.
+        if (!key?.startsWith("sk-")) return send(res, 401, { error: "Send your LiteLLM virtual key as Authorization: Bearer <key>." });
         const keyToken = createHash("sha256").update(key).digest("hex");
         if (!(await store.isActiveToken(keyToken))) {
           return send(res, 401, { error: "This key isn't an active LiteLLM virtual key (the master key can't be attributed)." });

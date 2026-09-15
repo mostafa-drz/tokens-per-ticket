@@ -37,6 +37,7 @@ Loaded with `litellm_settings.callbacks: tokens_per_ticket.proxy_handler_instanc
 during auth, before this hook, so they don't see these tags.
 """
 
+import asyncio
 import os
 import re
 import time
@@ -171,9 +172,14 @@ class SessionTicketTagger(CustomLogger):
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=self.timeout)
         try:
-            response = await self._client.get(
-                f"{self.registry_url}/v1/sessions/{quote(session_id, safe='')}",
-                headers={"Authorization": f"Bearer {self.registry_token}"},
+            # httpx timeouts apply per phase (connect, each read...), so a
+            # trickling response could take several times as long: bound the whole call.
+            response = await asyncio.wait_for(
+                self._client.get(
+                    f"{self.registry_url}/v1/sessions/{quote(session_id, safe='')}",
+                    headers={"Authorization": f"Bearer {self.registry_token}"},
+                ),
+                self.timeout,
             )
         except Exception:
             self._failures += 1
