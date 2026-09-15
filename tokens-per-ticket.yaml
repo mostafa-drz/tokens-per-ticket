@@ -40,8 +40,8 @@ automation:
   # nothing; switching branches mid-session is followed.
   sessions: true
   # The registry next to your LiteLLM gateway (gateway/docker-compose.yml runs
-  # one on :4100). Used only when it's on the same host as the engineer's
-  # ANTHROPIC_BASE_URL; otherwise set TPT_REGISTRY_URL in Claude Code settings.
+  # one on :4100). Hooks send the engineer's gateway key here, so use HTTPS
+  # outside localhost. TPT_REGISTRY_URL in Claude Code settings overrides it.
   registry_url: "http://localhost:4100"
   # Adds "Ticket: ENG-123" to commit messages on ticket branches, so a commit
   # or PR can be traced back to its ticket. Set to false to turn off.

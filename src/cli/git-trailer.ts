@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { findTicketKey, loadContract, type TicketContract } from "../lib/contract.ts";
 import { BUNDLE_PATH } from "./hint.ts";
@@ -46,21 +46,20 @@ export function runGitTrailer(argv: string[], cwd = process.cwd()): void {
   git(["interpret-trailers", "--in-place", "--if-exists", "doNothing", "--trailer", `${trailer}: ${ticket}`, path.resolve(cwd, messageFile)], cwd);
 }
 
-export type HookInstall = "installed" | "present" | "foreign" | "tracked" | "disabled" | "no-repo";
+export type HookInstall = "installed" | "present" | "foreign" | "elsewhere" | "disabled" | "no-repo";
 
 /**
- * Installs the prepare-commit-msg hook where git looks for hooks (respecting
- * core.hooksPath). Never overwrites a hook someone else wrote, and never
- * writes into a hooks folder inside the working tree (such as .husky), which
- * the team commits.
+ * Installs the prepare-commit-msg hook in the repo's .git/hooks (
+ * core.hooksPath). Never overwrites a hook someone else wrote.
  */
 export function ensureCommitTrailerHook(root: string, contract: TicketContract): HookInstall {
   if (!contract.automation.commit_trailer) return "disabled";
   const hooksDir = git(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], root);
   if (!hooksDir) return "no-repo";
-  const relative = path.relative(realpathSync(root), existsSync(hooksDir) ? realpathSync(hooksDir) : path.join(realpathSync(path.dirname(hooksDir)), path.basename(hooksDir)));
-  const inGitDir = relative === ".git" || relative.startsWith(`.git${path.sep}`);
-  if (!relative.startsWith("..") && !path.isAbsolute(relative) && !inGitDir) return "tracked";
+  // Only the repo's own .git/hooks: a core.hooksPath folder is either
+  // committed (.husky) or shared by every repo on the machine.
+  const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root);
+  if (!commonDir || path.relative(commonDir, hooksDir).startsWith("..")) return "elsewhere";
   const file = path.join(hooksDir, "prepare-commit-msg");
   try {
     if (existsSync(file)) {

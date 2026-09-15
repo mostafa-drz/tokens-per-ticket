@@ -23,8 +23,9 @@ import { hookSettings } from "./hook.ts";
 
 declare const __DEFAULT_CONFIG__: string | undefined;
 
-const USAGE = `Usage: node <path-to>/tpt.mjs init [--registry-url <url>] [--dir <repo>]
+const USAGE = `Usage: node <path-to>/tpt.mjs init --teams <ENG,WEB> [--registry-url <url>] [--dir <repo>]
 
+  --teams <keys>        Your tracker's team keys. Without them, branches like fix/utf-8-parsing read as ticket UTF-8
   --registry-url <url>  The session registry next to your LiteLLM gateway
   --dir <repo>          Repository to set up (default: the current one)`;
 
@@ -33,6 +34,7 @@ export async function runInit(argv: string[]): Promise<void> {
     args: argv,
     options: {
       "registry-url": { type: "string" },
+      teams: { type: "string" },
       dir: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -56,15 +58,24 @@ export async function runInit(argv: string[]): Promise<void> {
     console.error(`\n✖ --registry-url must be a full http(s) URL, such as https://litellm.your-company.dev:4100\n`);
     process.exit(1);
   }
+  const teams = (values.teams ?? "").split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
+  if (teams.some((t) => !/^[A-Z][A-Z0-9]*$/.test(t))) {
+    console.error(`\n✖ --teams takes team keys such as ENG,WEB.\n`);
+    process.exit(1);
+  }
   if (existsSync(configFile)) {
-    done.push(`kept your ${CONTRACT_FILE}${registryUrl ? ` (edit automation.registry_url there; --registry-url only applies to a new file)` : ""}`);
+    done.push(`kept your ${CONTRACT_FILE}${registryUrl || teams.length ? " (edit it directly; --registry-url and --teams only apply to a new file)" : ""}`);
   } else {
     let config = defaultConfig();
-    if (values["registry-url"]) config = config.replace(/registry_url: ".*"/, `registry_url: "${values["registry-url"]}"`);
+    if (registryUrl) config = config.replace(/registry_url: ".*"/, `registry_url: "${registryUrl}"`);
+    if (teams.length) config = config.replace(/teams: \[\]/, `teams: [${teams.join(", ")}]`);
     writeFileSync(configFile, config);
     done.push(`wrote ${CONTRACT_FILE} (Linear-style branches; edit it if yours differ)`);
   }
   const contract = loadContract(root);
+  if (contract.key.teams.length === 0) {
+    done.push(`⚠ key.teams is empty, so any branch shaped like the template counts, e.g. fix/utf-8-parsing as UTF-8. Add your team keys to ${CONTRACT_FILE}`);
+  }
 
   // 2. Bundle
   const self = fileURLToPath(import.meta.url);
@@ -103,8 +114,8 @@ export async function runInit(argv: string[]): Promise<void> {
   // 5. Commit trailer hook
   const hook = ensureCommitTrailerHook(root, contract);
   if (hook === "installed" || hook === "present") done.push(`commit trailer "${contract.automation.commit_trailer}: <KEY>" is on`);
-  if (hook === "tracked") {
-    done.push(`git hooks live in the repository (core.hooksPath), so the commit trailer was not installed. Add \`node ${BUNDLE_PATH} git-trailer "$@"\` to its prepare-commit-msg`);
+  if (hook === "elsewhere") {
+    done.push(`git hooks live in core.hooksPath, not .git/hooks, so the commit trailer was not installed. Add \`node ${BUNDLE_PATH} git-trailer "$@"\` to its prepare-commit-msg`);
   }
   if (hook === "foreign") {
     done.push(

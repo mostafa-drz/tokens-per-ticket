@@ -198,7 +198,7 @@ describe("commit trailer", () => {
   it("leaves a committed hooks folder (core.hooksPath) alone", () => {
     const root = productRepo("jane/eng-49-x");
     execFileSync("git", ["-C", root, "config", "core.hooksPath", ".husky"]);
-    assert.equal(ensureCommitTrailerHook(root, loadContract(root)), "tracked");
+    assert.equal(ensureCommitTrailerHook(root, loadContract(root)), "elsewhere");
     assert.equal(existsSync(path.join(root, ".husky")), false);
   });
 

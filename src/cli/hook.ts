@@ -134,7 +134,7 @@ export async function handleHook(input: HookInput, env: Env = process.env, deps:
         registered = state?.failed === false;
       }
       if (reported === "sent") registered = true;
-      if (reported === "failed") problems.push(`Couldn't report this session to the registry: ${failure.replace(/\.$/, "")}. Its spend isn't attributed until that works.`);
+      if (reported === "failed") problems.push(`Couldn't report this session to the registry: ${failure.replace(/\.$/, "")}. Until that works, its spend isn't attributed, or still counts toward the ticket it was last reported on.`);
     }
   }
 
