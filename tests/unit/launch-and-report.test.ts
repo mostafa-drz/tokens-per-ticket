@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import { parseContract } from "../../src/lib/contract.ts";
 import { claudeArgs, shellCommand, ticketBranches, withTicketTag } from "../../src/lib/launch.ts";
 import type { TicketDetail } from "../../src/lib/ledger.ts";
-import { postUnsupportedReason } from "../../src/lib/linear.ts";
+import { upsertJiraReport } from "../../src/lib/jira.ts";
+import { upsertLinearReport } from "../../src/lib/linear.ts";
+import { reportPoster } from "../../src/lib/post.ts";
 import { REPORT_SIGNATURE, renderReport } from "../../src/lib/report.ts";
 
 describe("withTicketTag", () => {
@@ -112,11 +114,65 @@ describe("renderReport", () => {
   });
 });
 
-describe("postUnsupportedReason", () => {
-  it("allows posting for Linear and refuses any other tracker with a way forward", () => {
-    assert.equal(postUnsupportedReason("linear"), null);
-    const reason = postUnsupportedReason("jira");
-    assert.match(reason ?? "", /Linear only/);
-    assert.match(reason ?? "", /tracker: jira/);
+describe("reportPoster", () => {
+  it("picks the tracker from the contract and says which credentials are missing", () => {
+    assert.match(reportPoster("linear", {}) as string, /LINEAR_API_KEY/);
+    assert.match(reportPoster("jira", { JIRA_BASE_URL: "https://acme.atlassian.net" }) as string, /JIRA_EMAIL, JIRA_API_TOKEN/);
+    assert.match(reportPoster("github", {}) as string, /linear or jira/);
+    assert.equal(typeof reportPoster("Jira", { JIRA_BASE_URL: "https://x", JIRA_EMAIL: "a@b", JIRA_API_TOKEN: "t" }), "function");
+  });
+});
+
+describe("upsertLinearReport", () => {
+  it("pages through comments and updates only this key's own report comment", async () => {
+    const calls: { query: string; variables: Record<string, unknown> }[] = [];
+    const pages = [
+      { nodes: [{ id: "c1", body: `quoted: ${REPORT_SIGNATURE}`, user: { id: "someone-else" } }], pageInfo: { hasNextPage: true, endCursor: "p2" } },
+      { nodes: [{ id: "c2", body: `report ${REPORT_SIGNATURE}`, user: { id: "me" } }], pageInfo: { hasNextPage: false, endCursor: null } },
+    ];
+    const result = await upsertLinearReport(
+      { key: "ENG-1", body: "new report" },
+      {
+        apiKey: "lin_api",
+        fetch: async (_url, init) => {
+          const request = JSON.parse(String(init?.body));
+          calls.push(request);
+          if (request.query.includes("TicketReportIssue")) {
+            const comments = pages[request.variables.after ? 1 : 0];
+            return Response.json({ data: { viewer: { id: "me" }, issue: { id: "i1", identifier: "ENG-1", url: "https://linear.app/x/ENG-1", comments } } });
+          }
+          return Response.json({ data: { commentUpdate: { success: true } } });
+        },
+      },
+    );
+    assert.equal(result.action, "updated");
+    assert.deepEqual(calls.at(-1)?.variables, { id: "c2", input: { body: "new report" } });
+  });
+});
+
+describe("upsertJiraReport", () => {
+  it("adds a comment when this account has none, as an ADF code block", async () => {
+    const requests: { method: string; url: string; body?: unknown }[] = [];
+    const result = await upsertJiraReport(
+      { key: "PROJ-42", body: `report ${REPORT_SIGNATURE}` },
+      {
+        baseUrl: "https://acme.atlassian.net",
+        email: "lead@acme.dev",
+        apiToken: "token",
+        fetch: async (url, init) => {
+          requests.push({ method: init?.method ?? "GET", url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+          assert.equal((init?.headers as Record<string, string>).Authorization, `Basic ${Buffer.from("lead@acme.dev:token").toString("base64")}`);
+          if (String(url).endsWith("/myself")) return Response.json({ accountId: "me" });
+          if (String(url).includes("/comment?")) return Response.json({ comments: [{ id: "9", author: { accountId: "other" }, body: { text: REPORT_SIGNATURE } }], total: 1 });
+          return Response.json({ id: "10" }, { status: 201 });
+        },
+      },
+    );
+    assert.equal(result.action, "created");
+    assert.equal(result.url, "https://acme.atlassian.net/browse/PROJ-42");
+    const post = requests.at(-1)!;
+    assert.equal(post.method, "POST");
+    assert.match(post.url, /\/rest\/api\/3\/issue\/PROJ-42\/comment$/);
+    assert.deepEqual((post.body as { body: { content: { type: string }[] } }).body.content[0].type, "codeBlock");
   });
 });

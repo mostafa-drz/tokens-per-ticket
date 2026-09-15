@@ -2,7 +2,7 @@
  * tpt report [TICKET-KEY] [--days 30] [--post]
  *
  * Prints what a ticket has cost so far, straight from LiteLLM.
- * With --post, writes the same report as one comment on the Linear ticket,
+ * With --post, writes the same report as one comment on the Linear or Jira ticket,
  * updated in place on later runs.
  *
  * Without a key, reads it from the current branch.
@@ -12,7 +12,7 @@ import { findTicketKey, loadContract, normalizeTicketKey, ticketTag } from "../l
 import { loadEnvLocal } from "../lib/env.ts";
 import { currentBranch, mainCheckoutRoot, tryGit } from "../lib/git.ts";
 import { summarizeTicket } from "../lib/ledger.ts";
-import { postUnsupportedReason, upsertReportComment } from "../lib/linear.ts";
+import { reportPoster } from "../lib/post.ts";
 import { fetchTagActivity, lastDays } from "../lib/litellm.ts";
 import { detectPackageManager, flagsTakenByNpm } from "../lib/package-manager.ts";
 import { renderReport } from "../lib/report.ts";
@@ -25,9 +25,9 @@ export async function runReport(argv: string[]): Promise<void> {
   const USAGE = `Usage: ${run("[TICKET-KEY]", "[--days <n>]", "[--post]")}
 
     --days <n>   Look back this many days, today included (default 30)
-    --post       Create or update the report comment on the Linear ticket
+    --post       Create or update the report comment on the ticket (Linear or Jira)
 
-  Environment (.env.local here or in the main checkout): LITELLM_BASE_URL, LITELLM_API_KEY, LINEAR_API_KEY (for --post)`;
+  Environment (.env.local here or in the main checkout): LITELLM_BASE_URL, LITELLM_API_KEY; for --post, LINEAR_API_KEY or JIRA_BASE_URL + JIRA_EMAIL + JIRA_API_TOKEN`;
 
   function fail(message: string): never {
     console.error(`\n✖ ${message}\n`);
@@ -70,10 +70,9 @@ export async function runReport(argv: string[]): Promise<void> {
     : ((branch && findTicketKey(branch, contract)) ??
       fail(`Branch "${branch ?? "(detached)"}" doesn't name a ticket. Pass a key: ${run("ENG-123")}`));
 
-  if (values.post) {
-    const reason = postUnsupportedReason(contract.tracker);
-    if (reason) fail(reason);
-  }
+  // Check posting credentials before reading any spend.
+  const poster = values.post ? reportPoster(contract.tracker) : null;
+  if (typeof poster === "string") fail(poster);
 
   const days = Number.parseInt(values.days, 10);
   if (!Number.isInteger(days) || days < 1) fail("--days must be a positive whole number.");
@@ -99,10 +98,9 @@ export async function runReport(argv: string[]): Promise<void> {
     const report = renderReport({ detail, tag, range, generatedAt: new Date() });
     console.log(`\n${report}\n`);
 
-    if (values.post) {
-      const linearKey = process.env.LINEAR_API_KEY || fail("Set LINEAR_API_KEY in .env.local to use --post.");
-      const { issue, action } = await upsertReportComment({ key, body: report }, { apiKey: linearKey });
-      console.log(`✓ Report comment ${action} on ${issue.identifier}: ${issue.url}`);
+    if (poster && typeof poster !== "string") {
+      const { identifier, url, action } = await poster({ key, body: report });
+      console.log(`✓ Report comment ${action} on ${identifier}: ${url}`);
     }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

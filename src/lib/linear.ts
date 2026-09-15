@@ -18,16 +18,7 @@ export class LinearError extends Error {
   }
 }
 
-/**
- * `--post` only knows Linear. For any other `tracker` in the contract, returns
- * why posting is refused, so a Jira key is never looked up in Linear.
- */
-export function postUnsupportedReason(tracker: string): string | null {
-  if (tracker.trim().toLowerCase() === "linear") return null;
-  return `--post writes to Linear only, but tokens-per-ticket.yaml sets tracker: ${tracker}. Run without --post and paste the report into your tracker.`;
-}
-
-type LinearConfig ={ apiKey: string; fetch?: typeof fetch };
+type LinearConfig = { apiKey: string; fetch?: typeof fetch };
 
 async function graphql<T>(config: LinearConfig, query: string, variables: Record<string, unknown>): Promise<T> {
   const response = await (config.fetch ?? fetch)(ENDPOINT, {
@@ -43,54 +34,66 @@ async function graphql<T>(config: LinearConfig, query: string, variables: Record
   return body.data;
 }
 
-export type LinearIssue = {
-  id: string;
-  identifier: string;
-  title: string;
-  url: string;
-  comments: { nodes: { id: string; body: string }[] };
+type CommentPage = {
+  nodes: { id: string; body: string; user: { id: string } | null }[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
 };
 
-export async function getIssue(key: string, config: LinearConfig): Promise<LinearIssue> {
-  const data = await graphql<{ issue: LinearIssue | null }>(
-    config,
-    `query TicketReportIssue($id: String!) {
-      issue(id: $id) {
-        id identifier title url
-        comments(first: 100) { nodes { id body } }
-      }
-    }`,
-    { id: key },
-  );
-  if (!data.issue) throw new LinearError(`Linear has no issue ${key}, or this API key can't see it.`);
-  return data.issue;
-}
+type IssuePage = {
+  viewer: { id: string };
+  issue: { id: string; identifier: string; url: string; comments: CommentPage } | null;
+};
 
-/** Updates the existing report comment if there is one, otherwise creates it. */
-export async function upsertReportComment(
+/**
+ * Updates this API key's own report comment if there is one, otherwise
+ * creates it. Pages through all comments, and never edits a comment someone
+ * else wrote, even if it quotes the report.
+ */
+export async function upsertLinearReport(
   input: { key: string; body: string },
   config: LinearConfig,
-): Promise<{ issue: LinearIssue; action: "created" | "updated" }> {
-  const issue = await getIssue(input.key, config);
-  const existing = issue.comments.nodes.find((comment) => comment.body.includes(REPORT_SIGNATURE));
+): Promise<{ url: string; identifier: string; action: "created" | "updated" }> {
+  let after: string | null = null;
+  let issue: IssuePage["issue"] = null;
+  let existing: string | undefined;
 
-  if (existing) {
-    await graphql(
+  do {
+    const page: IssuePage = await graphql<IssuePage>(
       config,
-      `mutation TicketReportUpdate($id: String!, $input: CommentUpdateInput!) {
-        commentUpdate(id: $id, input: $input) { success }
+      `query TicketReportIssue($id: String!, $after: String) {
+        viewer { id }
+        issue(id: $id) {
+          id identifier url
+          comments(first: 100, after: $after) {
+            nodes { id body user { id } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
       }`,
-      { id: existing.id, input: { body: input.body } },
+      { id: input.key, after },
     );
-    return { issue, action: "updated" };
-  }
+    if (!page.issue) throw new LinearError(`Linear has no issue ${input.key}, or this API key can't see it.`);
+    issue = page.issue;
+    existing = page.issue.comments.nodes.find((c) => c.user?.id === page.viewer.id && c.body.includes(REPORT_SIGNATURE))?.id;
+    after = !existing && page.issue.comments.pageInfo.hasNextPage ? page.issue.comments.pageInfo.endCursor : null;
+  } while (after);
 
-  await graphql(
-    config,
-    `mutation TicketReportCreate($input: CommentCreateInput!) {
-      commentCreate(input: $input) { success }
-    }`,
-    { input: { issueId: issue.id, body: input.body } },
-  );
-  return { issue, action: "created" };
+  const result = existing
+    ? await graphql<{ commentUpdate: { success: boolean } }>(
+        config,
+        `mutation TicketReportUpdate($id: String!, $input: CommentUpdateInput!) {
+          commentUpdate(id: $id, input: $input) { success }
+        }`,
+        { id: existing, input: { body: input.body } },
+      ).then((d) => d.commentUpdate.success)
+    : await graphql<{ commentCreate: { success: boolean } }>(
+        config,
+        `mutation TicketReportCreate($input: CommentCreateInput!) {
+          commentCreate(input: $input) { success }
+        }`,
+        { input: { issueId: issue!.id, body: input.body } },
+      ).then((d) => d.commentCreate.success);
+  if (!result) throw new LinearError("Linear didn't save the comment.");
+
+  return { url: issue!.url, identifier: issue!.identifier, action: existing ? "updated" : "created" };
 }
