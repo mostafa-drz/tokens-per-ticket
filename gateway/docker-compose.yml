@@ -1,0 +1,82 @@
+# Local LiteLLM gateway with Postgres, so spend is stored and queryable, plus
+# the session registry that lets the gateway tag calls with tickets on its own.
+#
+#   cp gateway/.env.example gateway/.env   # then fill in keys
+#   docker compose -f gateway/docker-compose.yml up -d
+#
+# Based on LiteLLM's own compose file and deploy guide:
+# https://docs.litellm.ai/docs/proxy/deploy
+# Pin the image: LiteLLM recommends a fixed tag over moving tags so
+# rollbacks are deterministic. v1.100.1 has the pieces this repo relies on:
+# x-litellm-tags merged before budget checks, the LiteLLM_DailyTagSpend
+# table, and x-<vendor>-session-id auto-detection.
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.100.1
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      # Loopback only. The trial master key is public (gateway/.env.example),
+      # so publishing on 0.0.0.0 would hand admin access to anyone on the
+      # network. A team gateway belongs behind TLS, per LiteLLM's deploy guide.
+      - "127.0.0.1:4000:4000"
+    # LITELLM_MASTER_KEY, LITELLM_SALT_KEY, ANTHROPIC_API_KEY, TPT_REGISTRY_TOKEN
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
+      TPT_REGISTRY_URL: http://registry:4100
+    volumes:
+      - ./litellm.config.yaml:/app/config.yaml:ro
+      # Loaded from config.yaml's directory by litellm_settings.callbacks.
+      - ./tokens_per_ticket.py:/app/tokens_per_ticket.py:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Which ticket each Claude Code session is on. Hooks in your repos report to
+  # it with the developer's virtual key (serve it over HTTPS in production); the
+  # gateway plugin reads it. It gets its own secret, not LiteLLM's keys. Locally it
+  # shares LiteLLM's database login; in production give it the narrow role the
+  # README describes.
+  registry:
+    build: ../registry
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4100:4100"
+    environment:
+      TPT_REGISTRY_TOKEN: ${TPT_REGISTRY_TOKEN}
+      DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4100/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d litellm -U litellm"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  postgres_data:

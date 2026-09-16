@@ -1,0 +1,44 @@
+# LiteLLM proxy config for development traffic.
+#
+# Routes models, stores spend, and loads the tokens_per_ticket plugin, which
+# tags each Claude Code call with its session's ticket from the registry.
+# LiteLLM already aggregates spend per tag.
+
+model_list:
+  # Pass any Anthropic model through by name, so Claude Code's model
+  # choices (and new releases) work without editing this file.
+  # https://docs.litellm.ai/docs/wildcard_routing
+  - model_name: "claude-*"
+    litellm_params:
+      model: "anthropic/claude-*"
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # A priced mock model. Lets you run the whole loop (tag -> spend -> report)
+  # with no provider key: `pnpm gateway:smoke` calls it.
+  # https://docs.litellm.ai/docs/completion/mock_requests
+  - model_name: "mock-ticket-model"
+    litellm_params:
+      model: "openai/mock-ticket-model"
+      api_key: "not-used"
+      mock_response: "This response is mocked. Its tokens are still counted."
+    # Custom pricing lives in model_info, not litellm_params.
+    # https://docs.litellm.ai/docs/proxy/custom_pricing
+    model_info:
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+
+litellm_settings:
+  # Tags Claude Code calls with the ticket their session is on, using the
+  # session registry. See gateway/tokens_per_ticket.py.
+  # https://docs.litellm.ai/docs/proxy/call_hooks
+  callbacks: tokens_per_ticket.proxy_handler_instance
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Keep raw per-request logs for 30 days. The cleanup job deletes
+  # LiteLLM_SpendLogs rows only; the daily per-tag rollups the ledger reads
+  # are kept. LiteLLM reads this from general_settings only (proxy_server.py
+  # and db/db_transaction_queue/spend_log_cleanup.py at v1.100.1); under
+  # litellm_settings it is silently ignored.
+  # https://docs.litellm.ai/docs/proxy/spend_logs_deletion
+  maximum_spend_logs_retention_period: "30d"
