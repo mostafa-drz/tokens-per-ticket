@@ -23,7 +23,11 @@ if (!adminKey) {
 }
 
 const calls: Record<string, number> = { "SMOKE-1": 3, "SMOKE-2": 1 };
-const today = new Date().toISOString().slice(0, 10);
+// LiteLLM buckets a day by its own server's clock, so span the timezone edge
+// instead of asking for "today" in UTC.
+const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+const from = day(-1);
+const to = day(1);
 
 function fail(message: string): never {
   console.error(`\n✖ ${message}`);
@@ -40,12 +44,12 @@ async function admin(path: string, body: unknown) {
   return response.json() as Promise<Record<string, unknown>>;
 }
 
-/** Requests recorded today for each ticket tag, straight from LiteLLM. */
+/** Requests recorded around now for each ticket tag, straight from LiteLLM. */
 async function requests(): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
   for (const ticket of Object.keys(calls)) {
     const url = new URL("/tag/daily/activity", baseUrl);
-    url.search = new URLSearchParams({ tags: `ticket:${ticket}`, start_date: today, end_date: today, page_size: "1000" }).toString();
+    url.search = new URLSearchParams({ tags: `ticket:${ticket}`, start_date: from, end_date: to, page_size: "1000" }).toString();
     const response = await fetch(url, { headers: { Authorization: `Bearer ${adminKey}` }  });
     if (!response.ok) fail(`${response.status} from /tag/daily/activity. Is LITELLM_API_KEY an admin or viewer key?`);
     const body = (await response.json()) as { results?: { metrics?: { api_requests?: number } }[] };
@@ -98,7 +102,7 @@ try {
     if (Object.entries(calls).every(([ticket, count]) => added[ticket] >= count)) {
       console.log("\n");
       for (const [ticket, count] of Object.entries(calls)) {
-        console.log(`   ${ticket.padEnd(8)} +${added[ticket]} this run (${count} expected), ${now[ticket]} requests today`);
+        console.log(`   ${ticket.padEnd(8)} +${added[ticket]} this run (${count} expected), ${now[ticket]} requests on ${from}…${to}`);
       }
       console.log("\n✓ The gateway attributed each session's calls to its ticket.\n");
       attributed = true;

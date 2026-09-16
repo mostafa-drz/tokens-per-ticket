@@ -2,7 +2,7 @@
 name: ticket-cost
 description: What a ticket has cost in AI tokens so far, read from the LiteLLM gateway, with the numbers worth discussing. Optionally posts or updates the figures as a comment on the ticket through the tracker's MCP server. Use when the user asks what this ticket or ENG-123 has cost.
 argument-hint: "[TICKET-KEY] [--days N] [--post]"
-allowed-tools: Bash(node .tokens-per-ticket/tpt.mjs ticket*), Bash(curl -sS -H * "$LITELLM_BASE_URL/tag/daily/activity*)
+allowed-tools: Bash(node .tokens-per-ticket/tpt.mjs ticket*), Bash(set -a*)
 ---
 
 # What this ticket cost
@@ -15,14 +15,18 @@ is always `ticket:<KEY>`.
 
 ## 2. The numbers
 
-Read them straight from the gateway (default 30 days; `--days N` changes the window):
+Read them straight from the gateway (default 30 days; `--days N` changes the window). Load the
+repository's `.env.local` in the same command, because `curl` doesn't read it on its own:
 
 ```bash
-curl -sS -H "Authorization: Bearer $LITELLM_API_KEY" \
-  "$LITELLM_BASE_URL/tag/daily/activity?tags=<tag>&start_date=<YYYY-MM-DD>&end_date=<today>&page_size=1000"
+set -a; [ -f .env.local ] && . ./.env.local; set +a; curl -sS -H "Authorization: Bearer $LITELLM_API_KEY" \
+  "$LITELLM_BASE_URL/tag/daily/activity?tags=<tag>&start_date=<window start>&end_date=<tomorrow>&page_size=1000"
 ```
 
-`LITELLM_BASE_URL` and `LITELLM_API_KEY` come from the environment or `.env.local`. That key reads
+Ask up to tomorrow's date: LiteLLM buckets each day by its own server's clock, so "today" in your
+timezone can miss the newest rows.
+
+`LITELLM_BASE_URL` and `LITELLM_API_KEY` come from the environment or that file. That key reads
 the whole organization's spend, so most laptops don't have it: if it's missing, say so and stop.
 
 Each day in `results` carries `metrics` (spend, prompt_tokens, completion_tokens,
