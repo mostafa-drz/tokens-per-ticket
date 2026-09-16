@@ -109,7 +109,14 @@ export async function runInit(argv: string[]): Promise<void> {
   // 4. Skills
   for (const [name, text] of Object.entries(SKILLS)) {
     const file = path.join(root, ".claude", "skills", name, "SKILL.md");
-    if (existsSync(file)) continue;
+    if (existsSync(file)) {
+      // Teams are meant to edit these, so never overwrite one. Say when it
+      // differs, because an older version can name a command that's gone.
+      if (readFileSync(file, "utf8") !== text) {
+        done.push(`kept your /${name} skill, which differs from this version. Delete it and re-run init to take the new one`);
+      }
+      continue;
+    }
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, text);
     done.push(`added the /${name} skill`);

@@ -55,6 +55,7 @@ async function requests(): Promise<Record<string, number>> {
 }
 
 let temporaryKey: string | undefined;
+let attributed = false;
 try {
   // A gateway started without its master key accepts admin calls from anyone.
   const unauthenticated = await fetch(new URL("/key/info", baseUrl), { headers: { Authorization: "Bearer sk-not-a-real-key" } });
@@ -100,10 +101,14 @@ try {
         console.log(`   ${ticket.padEnd(8)} +${added[ticket]} this run (${count} expected), ${now[ticket]} requests today`);
       }
       console.log("\n✓ The gateway attributed each session's calls to its ticket.\n");
-      process.exit(0);
+      attributed = true;
+      break;
     }
   }
-  fail("Spend didn't land on the tickets within 2 minutes. Check that the plugin is loaded: docker compose -f gateway/docker-compose.yml logs litellm");
+  // Not process.exit: the temporary key is deleted in `finally`.
+  if (!attributed) {
+    fail("Spend didn't land on the tickets within 2 minutes. Check that the plugin is loaded: docker compose -f gateway/docker-compose.yml logs litellm");
+  }
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 } finally {
